@@ -26,8 +26,8 @@ CREATE TABLE agent_actions(
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     query_id UUID REFERENCES queries,
     step_number INTEGER,
-    action_type VARCHAR(50),  --search retrive generate
+    action_type VARCHAR(50),  --'search', 'retrive', 'generate'
     tool_input TEXT,
-    too_output TEXT,
+    tool_output TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
 );

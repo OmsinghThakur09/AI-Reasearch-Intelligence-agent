@@ -28,6 +28,7 @@ class Document(Base):
     id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     query_id = mapped_column(UUID(as_uuid=True), ForeignKey(Query.id))
     url = mapped_column(Text, nullable=False)
+    title = mapped_column(Text)
     raw_content = mapped_column(Text)
     clean_text = mapped_column(Text)
     fetched_at = mapped_column(DateTime, server_default=func.now())
@@ -38,14 +39,16 @@ class Source(Base):
     id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     query_id = mapped_column(UUID(as_uuid=True), ForeignKey(Query.id))
     url = mapped_column(Text, nullable=False)
-    snippet = mapped_column(Text)
+    snippet = mapped_column(
+        Text
+    )  # for storing web-search content preview, prevents saving whole document.
 
 
 class AgentAction(Base):
     __tablename__ = "agentactions"
     id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     query_id = mapped_column(UUID(as_uuid=True), ForeignKey(Query.id))
-    step_numebers = mapped_column(Integer)
+    step_numbers = mapped_column(Integer)
     action_type = mapped_column(String(50))
     tool_input = mapped_column(Text)
     tool_output = mapped_column(Text)

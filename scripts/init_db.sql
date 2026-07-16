@@ -2,7 +2,7 @@
 CREATE TABLE queries(
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     query_text TEXT NOT NULL,
-    q_status VARCHAR(20) DEFAULT pending, --updated to 'completed' or 'failed'
+    status VARCHAR(20) DEFAULT 'pending', --updated to 'completed' or 'failed'
     created_at TIMESTAMP DEFAULT NOW(),
 );
 

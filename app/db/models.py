@@ -26,7 +26,7 @@ class Query(Base):
 class Document(Base):
     __tablename__ = "documents"
     id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    query_id = mapped_column(UUID(as_uuid=True), ForeignKey(Query.id))
+    query_id = mapped_column(UUID(as_uuid=True), ForeignKey("queries.id"))
     url = mapped_column(Text, nullable=False)
     title = mapped_column(Text)
     raw_content = mapped_column(Text)
@@ -37,7 +37,7 @@ class Document(Base):
 class Source(Base):
     __tablename__ = "sources"
     id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    query_id = mapped_column(UUID(as_uuid=True), ForeignKey(Query.id))
+    query_id = mapped_column(UUID(as_uuid=True), ForeignKey("queries.id"))
     url = mapped_column(Text, nullable=False)
     snippet = mapped_column(
         Text
@@ -47,7 +47,7 @@ class Source(Base):
 class AgentAction(Base):
     __tablename__ = "agentactions"
     id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    query_id = mapped_column(UUID(as_uuid=True), ForeignKey(Query.id))
+    query_id = mapped_column(UUID(as_uuid=True), ForeignKey("queries.id"))
     step_numbers = mapped_column(Integer)
     action_type = mapped_column(String(50))
     tool_input = mapped_column(Text)

@@ -1,4 +1,4 @@
--- Only raw SQL script to isolate from python code for creating tables in database.
+-- Only raw SQL script to isolate from python code just for understanding.
 CREATE TABLE queries(
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     query_text TEXT NOT NULL,

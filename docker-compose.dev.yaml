@@ -2,7 +2,7 @@ services:
   db:
     image: postgres:16
     environment:
-      POSTGRES_DB: research-agent
+      POSTGRES_DB: research_agent
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
 

@@ -13,7 +13,7 @@ class Base(DeclarativeBase):
 
 
 class Query(Base):
-    __tabelname__ = "queries"
+    __tablename__ = "queries"
     id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     query_text = mapped_column(Text)
     status = mapped_column(String(20), default="pending")
@@ -45,7 +45,7 @@ class Source(Base):
 
 
 class AgentAction(Base):
-    __tablename__ = "agentactions"
+    __tablename__ = "agenta_ctions"
     id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     query_id = mapped_column(UUID(as_uuid=True), ForeignKey("queries.id"))
     step_numbers = mapped_column(Integer)

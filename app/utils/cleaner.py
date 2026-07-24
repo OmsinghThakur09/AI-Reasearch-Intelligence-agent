@@ -8,7 +8,6 @@ function to clean raw web results from tavily search:
     Remove repeated headings
     Drop very short documents
     Drop duplicate documents
-    Compute metadata (length, words)
     Return cleaned documents
 """
 
@@ -28,7 +27,13 @@ BOILERPLATE_PATTERNS = [
     r"Listen now",
     r"Get the guide",
     r"Explore .*",
+    r"Sign up for a free account.*?(?=\.|$)",
+    r"Sign in\b",
+    r"Jump to content",
+    r"Next steps on \w+.*",
 ]
+
+MIN_WORD_COUNT = 150
 
 
 def clean(raw_texts: list[str]) -> list[dict]:
@@ -46,17 +51,19 @@ def clean(raw_texts: list[str]) -> list[dict]:
     # remove boilerplate patters
     for pattern in BOILERPLATE_PATTERNS:
         df["clean"] = df["clean"].apply(
-            lambda x: re.sub(pattern, "flags=re.IGNORECASE | re.DOTALL", x)
+            lambda x: re.sub(pattern, "", x, flags=re.IGNORECASE | re.DOTALL)
         )
 
     # remove duplicate consecutive headings
-    df["clean"] = df["clean"].apply(lambda x: re.sub(r"\b(.{5,80})\b\s+\1\b", r"\1", x))
+    df["clean"] = df["clean"].apply(
+        lambda x: re.sub(r"\b(.{5,80}?)\b\s+\1\b", r"\1", x, flags=re.IGNORECASE)
+    )
 
     # remove whitespace again
     df["clean"] = df["clean"].str.strip()
 
     # remove very short entries
-    df = df[df["clean"].str.len() > 150]
+    df = df[df["clean"].str.len() > MIN_WORD_COUNT]
 
     # remove duplicates
     df = df.drop_duplicates(subset="clean")

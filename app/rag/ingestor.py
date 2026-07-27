@@ -19,13 +19,12 @@ def get_vectorstore() -> Chroma:
     embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
     return Chroma(
-        collection_name="research_agent",
         embedding_function=embeddings,
         persist_directory=CHROMA_DIR,
     )
 
 
-def ingestor(clean_text: list[str], metadata: list[dict]) -> None:
+def ingest_clean_text(clean_text: list[str], metadata: list[dict]) -> None:
     """
     Function to chunk and store pre-cleaned web results into vectorstore
     """

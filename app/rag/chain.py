@@ -12,6 +12,7 @@ from langchain_classic.chains.combine_documents import (
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 from app.rag.ingestor import get_vectorstore
+from config import GROQ_API_KEY
 
 system_prompt = """You are a research assistant, use only provided context to answer, always site source URLs at the end of your answer.
     If the context doesn't contain the enough information, say so explicitly.
@@ -27,7 +28,9 @@ def build_rag_chain():
     vectorstore = get_vectorstore()  # loads from disk
     retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
-    llm_model = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+    llm_model = ChatGroq(
+        api_key=GROQ_API_KEY, model="llama-3.3-70b-versatile", temperature=0
+    )
     # this chain handles injecting retrieved documents into context variable
     qa_chain = create_stuff_documents_chain(llm=llm_model, prompt=PROMPT)
 

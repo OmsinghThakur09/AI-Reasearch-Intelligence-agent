@@ -4,11 +4,8 @@ classifying user query into 'deep' and 'simple' research depth and desciding whe
 """
 
 from groq import Groq
-from dotenv import load_dotenv
 import json
-import os
-
-load_dotenv()
+from config import GROQ_API_KEY
 
 
 def llm_planner(user_query: str) -> dict:
@@ -35,7 +32,7 @@ def llm_planner(user_query: str) -> dict:
     Output nothing except valid JSON."""
 
     client = Groq(
-        api_key=os.environ.get("GROQ_API_KEY"),
+        api_key=GROQ_API_KEY,
     )
 
     response = client.chat.completions.create(

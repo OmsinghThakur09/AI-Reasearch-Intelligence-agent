@@ -9,7 +9,7 @@ from langchain_classic.chains import create_retrieval_chain
 from langchain_classic.chains.combine_documents import (
     create_stuff_documents_chain,
 )
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_groq import ChatGroq
 from app.rag.ingestor import get_vectorstore
 from config import GROQ_API_KEY
@@ -22,6 +22,8 @@ PROMPT = ChatPromptTemplate.from_messages(
     [("system", system_prompt), ("human", "{input}")]
 )
 
+document_prompt = PromptTemplate.from_template("{page_content} Source: {url}")
+
 
 def build_rag_chain():
     """function that loads persisted vector store from the disk and return Retrieval chain built over it."""
@@ -32,7 +34,9 @@ def build_rag_chain():
         api_key=GROQ_API_KEY, model="llama-3.3-70b-versatile", temperature=0
     )
     # this chain handles injecting retrieved documents into context variable
-    qa_chain = create_stuff_documents_chain(llm=llm_model, prompt=PROMPT)
+    qa_chain = create_stuff_documents_chain(
+        llm=llm_model, prompt=PROMPT, document_prompt=document_prompt
+    )
 
     # this chain links your vector database with qa chain.
     return create_retrieval_chain(retriever, qa_chain)

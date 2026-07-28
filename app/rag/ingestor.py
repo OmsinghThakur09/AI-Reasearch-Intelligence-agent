@@ -8,6 +8,7 @@ output: vectore store(stored embeddings of input)
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
+import hashlib
 
 CHROMA_DIR = "./chroma_db"
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
@@ -34,5 +35,13 @@ def ingest_clean_text(clean_text: list[str], metadata: list[dict]) -> None:
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     chunks = splitter.create_documents(clean_text, metadatas=metadata)
 
+    # to avoid duplicate vector generation, passing id into add_documents funtion.
+    # document having same id will be udated in vector store instead of duplicating.
+
+    id = [
+        hashlib.sha256(chunk.page_content.encode("utf-8")).hexdigest()
+        for chunk in chunks
+    ]
+
     vectorstore = get_vectorstore()
-    vectorstore.add_documents(chunks)
+    vectorstore.add_documents(chunks, id=id)

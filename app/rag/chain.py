@@ -22,7 +22,7 @@ PROMPT = ChatPromptTemplate.from_messages(
     [("system", system_prompt), ("human", "{input}")]
 )
 
-document_prompt = PromptTemplate.from_template("{page_content} Source: {url}")
+document_prompt = PromptTemplate.from_template("{page_content}\nSource: {url}")
 
 
 def build_rag_chain():
@@ -31,7 +31,9 @@ def build_rag_chain():
     retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
     llm_model = ChatGroq(
-        api_key=GROQ_API_KEY, model="llama-3.3-70b-versatile", temperature=0
+        api_key=GROQ_API_KEY,  # type: ignore
+        model="llama-3.3-70b-versatile",
+        temperature=0,  # pyright: ignore[reportArgumentType]
     )
     # this chain handles injecting retrieved documents into context variable
     qa_chain = create_stuff_documents_chain(

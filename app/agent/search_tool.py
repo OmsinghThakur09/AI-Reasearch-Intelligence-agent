@@ -7,7 +7,7 @@ from langchain_core.tools import tool
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
 from app.utils.cleaner import clean
 from config import TAVILY_API_KEY
-from app.db.queries import save_documents
+from app.db.queries import save_documents, save_sources
 import uuid
 
 _tavily = TavilySearchAPIWrapper(tavily_api_key=TAVILY_API_KEY)  # type: ignore
@@ -49,6 +49,8 @@ def make_search_tool(query_id: uuid.UUID):
                 )
 
         save_documents(query_id, metadatas, raw_clean_dict)
+
+        save_sources(query_id, metadatas)
 
         return (
             f"Found {len(metadatas)} result(s), full content stored in database for further process:\n\n"

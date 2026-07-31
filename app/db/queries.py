@@ -1,7 +1,7 @@
 # app/db/queries.py
 
 # script for qureies that will be used again and again in this project
-from app.db.models import Query, Document
+from app.db.models import Query, Document, Source
 from app.db.session import Sessionlocal
 import uuid
 
@@ -21,9 +21,9 @@ def update_query_status(q_id: uuid.UUID, status: str):
         session.commit()
 
 
-def save_documents(q_id: uuid.UUID, metadetas: list, raw_clean_dict: list):
+def save_documents(q_id: uuid.UUID, metadatas: list, raw_clean_dict: list):
     with Sessionlocal() as session:
-        for metadata, clean_row in zip(metadetas, raw_clean_dict):
+        for metadata, clean_row in zip(metadatas, raw_clean_dict):
             doc = Document(
                 query_id=q_id,
                 url=metadata["url"],
@@ -32,4 +32,17 @@ def save_documents(q_id: uuid.UUID, metadetas: list, raw_clean_dict: list):
                 clean_text=clean_row["clean"],
             )
             session.add(doc)
+        session.commit()
+
+
+def save_sources(q_id: uuid.UUID, metadatas: list):
+    with Sessionlocal() as session:
+        for metadata in metadatas:
+            source = Source(
+                query_id=q_id,
+                url=metadata["url"],
+                title=metadata["title"],
+                snippet=metadata["content"],
+            )
+            session.add(source)
         session.commit()

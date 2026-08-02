@@ -41,7 +41,6 @@ def save_sources(q_id: uuid.UUID, metadatas: list):
             source = Source(
                 query_id=q_id,
                 url=metadata["url"],
-                title=metadata["title"],
                 snippet=metadata["content"],
             )
             session.add(source)

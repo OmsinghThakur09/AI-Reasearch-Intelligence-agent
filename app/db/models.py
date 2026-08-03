@@ -45,10 +45,10 @@ class Source(Base):
 
 
 class AgentAction(Base):
-    __tablename__ = "agenta_ctions"
+    __tablename__ = "agent_actions"
     id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     query_id = mapped_column(UUID(as_uuid=True), ForeignKey("queries.id"))
-    step_numbers = mapped_column(Integer)
+    step_number = mapped_column(Integer)
     action_type = mapped_column(String(50))
     tool_input = mapped_column(Text)
     tool_output = mapped_column(Text)

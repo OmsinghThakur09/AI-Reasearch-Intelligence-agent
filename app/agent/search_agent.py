@@ -24,21 +24,24 @@ def build_agent():
         model=MODEL,
         temperature=0,
     )
-    tool, _ = make_search_tool()
-    return create_agent(model=llm_model, tools=[tool], checkpointer=memory)
+    tool, raw_content = make_search_tool()
+    return create_agent(model=llm_model, tools=[tool], checkpointer=memory), raw_content
 
 
 def run_agent(query: str, session_id: str) -> dict:
-    agent = build_agent()
+    agent, raw_content = build_agent()
     config = {"configurable": {"thread_id": session_id}}
-    return agent.invoke(
-        {"messages": [{"role": "user", "content": query}]},
-        config=config,  # type: ignore
+    return (
+        agent.invoke(
+            {"messages": [{"role": "user", "content": query}]},
+            config=config,  # type: ignore
+        ),
+        raw_content,
     )
 
 
 if __name__ == "__main__":
-    query = "How Quantum Computing can be used to cure Cancer?"
+    query = "what is Quantum Computing and How Quantum Computing can be used to cure Cancer?"
 
-    result = run_agent(query, "12jk3")
+    result, _ = run_agent(query, "12jk3")
     print(result)

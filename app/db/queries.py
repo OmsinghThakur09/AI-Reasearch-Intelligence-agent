@@ -1,8 +1,9 @@
 # app/db/queries.py
 
 # script for qureies that will be used again and again in this project
-from app.db.models import Query, Document, Source
+from app.db.models import Query, Document, Source, AgentAction
 from app.db.session import Sessionlocal
+import json
 import uuid
 
 
@@ -44,4 +45,52 @@ def save_sources(q_id: uuid.UUID, metadatas: list):
                 snippet=metadata["content"],
             )
             session.add(source)
+        session.commit()
+
+
+def save_agent_actions(messages: list, query_id: uuid.UUID):
+    with Sessionlocal() as session:
+        tool_was_used = False
+        for i, msg in enumerate(messages):
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                tool_was_used = True
+                for call in msg.tool_calls:
+                    call_id = call.get("id")
+                    urls = []
+
+                    # find the ToolMessage whose tool_call_id matches this call
+                    for m in messages:
+                        if hasattr(m, "tool_call_id") and m.tool_call_id == call_id:
+                            try:
+                                parsed = json.loads(m.content)
+                                urls = [
+                                    item["url"]
+                                    for item in parsed.get("metadata", [])
+                                    if "url" in item
+                                ]
+                            except (json.JSONDecodeError, TypeError):
+                                urls = []
+                            break
+
+                    session.add(
+                        AgentAction(
+                            query_id=query_id,
+                            step_number=i,
+                            action_type="search",
+                            tool_input=str(call.get("args", "")),
+                            tool_output=", ".join(urls),
+                        )
+                    )
+
+        if not tool_was_used:
+            session.add(
+                AgentAction(
+                    query_id=query_id,
+                    step_number=0,
+                    action_type="no_tool_used",
+                    tool_input=None,
+                    tool_output=None,
+                )
+            )
+
         session.commit()

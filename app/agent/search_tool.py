@@ -10,9 +10,36 @@ from config import TAVILY_API_KEY
 _tavily = TavilySearchAPIWrapper(tavily_api_key=TAVILY_API_KEY)  # type: ignore
 
 
+def web_search_executor(query: str):
+    raw_content = []
+    raw_results = _tavily.raw_results(
+        query=query,
+        max_results=2,
+        include_raw_content="text",  # type: ignore
+    )
+
+    results = raw_results.get("results", [])
+    if not results:
+        return "result not found"
+
+    raw_content.extend([r.get("raw_content", "") for r in results])
+
+    metadatas = []
+    for item in results:
+        metadatas.append(
+            {
+                "url": item["url"],
+                "title": item["title"],
+                "content": item.get("content", ""),
+            }
+        )
+
+    return raw_content, metadatas
+
+
 def make_search_tool():
     """
-    Factory function to create custom search tool for each user query
+    Factory function to create custom search tool
     """
     raw_content = []
 
@@ -23,39 +50,17 @@ def make_search_tool():
         "both raw_content and cleaned text"
         "and send all info except raw_content to ReAct agent"
 
-        raw_results = _tavily.raw_results(
-            query=search_query,
-            max_results=2,
-            include_raw_content="text",  # type: ignore
-        )
+        raw, metadatas = web_search_executor(search_query)
+        raw_content.extend(raw)
 
-        results = raw_results.get("results", [])
-        if not results:
-            return "result not found"
+        toolmessage = {}
+        toolmessage[
+            "instruction"
+        ] = f"""Found {len(metadatas)} result(s), full content stored in database for further process,
+        Use below summaries to judge whether you have enough information to answer, or need to search again with a more specific query."""
 
-        raw_content.append(r.get("raw_content", "") for r in results)
+        toolmessage["metadata"] = metadatas
 
-        # raw_clean_dict = clean(raw_content)
-
-        metadatas = []
-        for item in results:
-            metadatas.append(
-                {
-                    "url": item["url"],
-                    "title": item["title"],
-                    "content": item.get("content", ""),
-                }
-            )
-
-        # save_documents(query_id, metadatas, raw_clean_dict)
-
-        # save_sources(query_id, metadatas)
-
-        return {
-            "instruction": f"Found {len(metadatas)} result(s), full content stored in database for further process:\n"
-            + "\nUse below summaries to judge whether you have enough information "
-            "to answer, or need to search again with a more specific query.",
-            "metadata": metadatas,
-        }
+        return toolmessage
 
     return web_search_tool, raw_content

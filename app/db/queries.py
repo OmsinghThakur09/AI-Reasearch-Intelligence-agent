@@ -22,6 +22,12 @@ def update_query_status(q_id: uuid.UUID, status: str):
         session.commit()
 
 
+def update_error_message(q_id: uuid.UUID, error_msg: str):
+    with Sessionlocal() as session:
+        session.query(Query).filter(Query.id == q_id).update({"error": error_msg})
+        session.commit()
+
+
 def save_documents(q_id: uuid.UUID, metadatas: list, raw_clean_dict: list):
     with Sessionlocal() as session:
         for metadata, clean_row in zip(metadatas, raw_clean_dict):
@@ -41,8 +47,8 @@ def save_sources(q_id: uuid.UUID, metadatas: list):
         for metadata in metadatas:
             source = Source(
                 query_id=q_id,
-                url=metadata["url"],
-                snippet=metadata["content"],
+                url=metadata.get("url", ""),
+                snippet=metadata.get("content", ""),
             )
             session.add(source)
         session.commit()

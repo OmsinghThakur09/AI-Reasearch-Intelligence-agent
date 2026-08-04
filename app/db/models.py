@@ -21,6 +21,7 @@ class Query(Base):
         DateTime, server_default=func.now()
     )  # major difference: server_default(sql sever side) vs default(python side)
     # sever_default set default value whenever query is fired but default only set when query fired through python.
+    error = mapped_column(Text, default=None)
 
 
 class Document(Base):

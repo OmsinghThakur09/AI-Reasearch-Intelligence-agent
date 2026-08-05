@@ -1,0 +1,2 @@
+[too.fastapi]
+entrypoint = "app.api:routes.py"

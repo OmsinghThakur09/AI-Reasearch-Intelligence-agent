@@ -14,7 +14,7 @@ def web_search_executor(query: str):
     raw_content = []
     raw_results = _tavily.raw_results(
         query=query,
-        max_results=2,
+        max_results=3,
         include_raw_content="text",  # type: ignore
     )
 

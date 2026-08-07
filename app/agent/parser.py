@@ -5,7 +5,7 @@ search agent returns agent.invoke() that contains list of messages (Human messag
 to store search result and its metadata(url, title, snippet) we need to parse it.
 """
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolMessage, AIMessage
 import uuid
 import json
 
@@ -48,6 +48,15 @@ def parse_agent_output(agent_output: dict):
                 )
 
     return list(set(source)), raw_docs  # type: ignore
+
+
+def aianswer_parser(output: dict):
+    "to parse only ai message that dont contain any tool calls"
+    messages = output["messages"]
+
+    for message in messages:
+        if isinstance(message, AIMessage):
+            return message.content
 
 
 if __name__ == "__main__":

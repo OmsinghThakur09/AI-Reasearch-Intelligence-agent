@@ -39,89 +39,52 @@ class AgentState(TypedDict):
     optimized_queries: list
 
 
-OPTIMIZE_SYSTEM_PROMPT = """QUESTION: what is the boiling point of water at sea level
-RAW MODEL OUTPUT: {
-  "queries": ["boiling point of water at sea level"]
-}
-PARSED QUERIES: ['boiling point of water at sea level']
+OPTIMIZE_SYSTEM_PROMPT = """You are a search query planner for a research agent.
 
-QUESTION: who is the current CEO of Microsoft
-RAW MODEL OUTPUT: {
-  "queries": ["Microsoft current CEO"]
-}
-PARSED QUERIES: ['Microsoft current CEO']
+Given the user's question, output a JSON object with a single key "queries",
+containing an array of 1 to 3 focused, keyword-rich search queries.
 
-QUESTION: what is the capital of Japan
-RAW MODEL OUTPUT: {
-  "queries": ["Japan capital city"]
-}
-PARSED QUERIES: ['Japan capital city']
+A "sub-topic" means a distinct entity, item, or thing being discussed —
+not a different angle, facet, or aspect of the same single concept.
 
-QUESTION: explain how photosynthesis works in plants
-RAW MODEL OUTPUT: {
+Rules:
+- If the question asks about ONE concept, thing, or entity — even if the
+  question uses open-ended phrasing like "explain", "what is", or "how does
+  X work" — output exactly ONE query. Do not split a single concept into
+  multiple angles or facets of itself.
+- Only output more than one query if the question explicitly names or implies
+  multiple distinct things (e.g. comparing two items, listing multiple
+  entities, or asking about separate causes/effects/solutions/parts of a
+  larger topic).
+- Respond with ONLY the JSON object. No explanation, no markdown, no extra text.
+
+Example 1 (single concept — one query, even though phrased broadly):
+Question: "explain how photosynthesis works in plants"
+Output:
+{
   "queries": ["photosynthesis process in plants"]
 }
-PARSED QUERIES: ['photosynthesis process in plants']
 
-QUESTION: what are the health benefits of drinking green tea
-RAW MODEL OUTPUT: {
-  "queries": ["green tea health benefits"]
+Example 2 (single concept — one query):
+Question: "what is quantum computing"
+Output:
+{
+  "queries": ["quantum computing explained"]
 }
-PARSED QUERIES: ['green tea health benefits']
 
-QUESTION: compare Python and Rust for backend development
-RAW MODEL OUTPUT: {
-  "queries": ["Python vs Rust for backend development", "Rust backend development advantages", "Python backend development use cases"]
+Example 3 (genuinely multiple distinct things — split):
+Question: "compare RAG and multi-agent RAG for legal document analysis"
+Output:
+{
+  "queries": ["RAG vs multi-agent RAG comparison", "multi-agent RAG legal document analysis use case"]
 }
-PARSED QUERIES: ['Python vs Rust for backend development', 'Rust backend development advantages', 'Python backend development use cases']
 
-QUESTION: pros and cons of remote work vs office work
-RAW MODEL OUTPUT: {
-  "queries": ["remote work pros and cons", "office work advantages and disadvantages", "remote vs office work comparison"]
-}
-PARSED QUERIES: ['remote work pros and cons', 'office work advantages and disadvantages', 'remote vs office work comparison']
-
-QUESTION: difference between machine learning and deep learning, and which one is used in self-driving cars
-RAW MODEL OUTPUT: {
-  "queries": ["machine learning vs deep learning", "deep learning in self-driving cars"]
-}
-PARSED QUERIES: ['machine learning vs deep learning', 'deep learning in self-driving cars']
-
-QUESTION: what is the best Claude model for building websites in 2026
-RAW MODEL OUTPUT: {
-  "queries": ["Claude models for web development 2026", "best Claude model for website building"]
-}
-PARSED QUERIES: ['Claude models for web development 2026', 'best Claude model for website building']
-
-QUESTION: how do I improve my resume for a software engineering job
-RAW MODEL OUTPUT: {
-  "queries": ["software engineering resume tips", "resume building for software engineers", "optimizing a software engineering resume"]
-}
-PARSED QUERIES: ['software engineering resume tips', 'resume building for software engineers', 'optimizing a software engineering resume']
-
-QUESTION: what is quantum computing
-RAW MODEL OUTPUT: {
-  "queries": ["quantum computing basics"]
-}
-PARSED QUERIES: ['quantum computing basics']
-
-QUESTION: how does the stock market work
-RAW MODEL OUTPUT: {
-  "queries": ["stock market basics"]
-}
-PARSED QUERIES: ['stock market basics']
-
-QUESTION: what are the causes, effects, and solutions for climate change
-RAW MODEL OUTPUT: {
+Example 4 (genuinely multiple distinct things — split):
+Question: "what are the causes, effects, and solutions for climate change"
+Output:
+{
   "queries": ["causes of climate change", "effects of climate change", "solutions to climate change"]
 }
-PARSED QUERIES: ['causes of climate change', 'effects of climate change', 'solutions to climate change']
-
-QUESTION: compare the economic policies of USA, China, and India in 2026
-RAW MODEL OUTPUT: {
-  "queries": ["US economic policy 2026", "China economic policy 2026", "India economic policy 2026"]
-}
-PARSED QUERIES: ['US economic policy 2026', 'China economic policy 2026', 'India economic policy 2026']
 """
 
 
@@ -249,5 +212,5 @@ if __name__ == "__main__":
         "state which of the current claude model is best for building websites in 2026?"
     )
 
-    result, _ = run_agent(query, "98l3677lk")
+    result, _ = run_agent(query, "98l367h7lk")
     print(result)

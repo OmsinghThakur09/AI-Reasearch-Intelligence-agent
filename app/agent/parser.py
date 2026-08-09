@@ -60,11 +60,11 @@ def aianswer_parser(output: dict):
 
 
 if __name__ == "__main__":
-    from app.agent.search_agent import run_agent
+    from app.agent.search_agent_V2 import run_agent
 
     query = "who won last IPL tournament?"
     query_id = uuid.UUID("70b2a0a2-56df-42d3-abe0-d8914a0a392c")
 
-    result = run_agent(query, "12jk3")
+    result, _ = run_agent(query, "124225jk3")
 
     print(parse_agent_output(result))

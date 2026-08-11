@@ -23,6 +23,7 @@ import sqlite3
 import json
 import concurrent.futures
 from typing import TypedDict, Annotated
+from datetime import datetime
 
 from config import GROQ_API_KEY
 from app.agent.search_tool import make_search_tool, web_search_executor
@@ -39,7 +40,12 @@ class AgentState(TypedDict):
     optimized_queries: list
 
 
-OPTIMIZE_SYSTEM_PROMPT = """You are a search query planner for a research agent.
+current_date = datetime.now().strftime("%B %d, %Y")
+
+OPTIMIZE_SYSTEM_PROMPT = (
+    f"You are a search query planner for a research agent, Today's current date is {current_date}"
+    + """Always
+use this date as the absolute baseline anchor for the current year and any relative time calculations (e.g., 'yesterday', 'next month').
 
 Given the user's question, output a JSON object with a single key "queries",
 containing an array of 1 to 3 focused, keyword-rich search queries.
@@ -86,12 +92,24 @@ Output:
   "queries": ["causes of climate change", "effects of climate change", "solutions to climate change"]
 }
 """
+)
+
+AGENT_SYSTEM_PROMPT = """You are a research assistant answering the user's question using search results already provided in this conversation.
+
+Before calling web_search_tool again, check the full conversation history for
+queries that were already searched. Do not issue a new search query that is a
+rephrasing, synonym, or near-duplicate of any prior query — this wastes calls
+and returns overlapping results. Only search again if you can name a specific
+piece of missing information the existing results do not cover.
+
+If the existing results are enough to answer the question, answer directly
+without calling any tool."""
 
 
 def build_agent():
     "build the graph: optimize -> concurrent search -> agent (loop or end)"
 
-    tool, raw_content = make_search_tool()
+    tool, raw_content, seen_urls = make_search_tool()
     tools = [tool]
 
     # planner llm: no tool call only plain llm to optimize user query
@@ -141,8 +159,29 @@ def build_agent():
                 q = future_to_query[future]
 
                 try:
-                    raw, metadata = future.result()
-                    raw_content.extend(raw)
+                    items = future.result()
+
+                    # dedupe by url here, in the main process, against the SAME
+                    # seen_urls set used later by web_search_tool in the agent loop,
+                    # so a page returned by two different optimized queries (or
+                    # re-searched later) is only ever added to raw_content once
+                    metadata = []
+                    for item in items:
+                        url = item["url"]
+                        if url and url in seen_urls:
+                            continue
+                        if url:
+                            seen_urls.add(url)
+
+                        raw_content.append(item["raw_content"])
+                        metadata.append(
+                            {
+                                "url": url,
+                                "title": item["title"],
+                                "content": item["content"],
+                            }
+                        )
+
                     results_by_query.append({"query": q, "results": metadata})
 
                 except Exception as e:
@@ -164,8 +203,13 @@ def build_agent():
 
         summary_text = "\n".join(summary_lines)
         summary_text += (
-            "\nUse the above to answer. If it's insufficient, "
-            "you may call web_search_tool again with a more specific query."
+            f"\n\nQueries already searched: {queries}\n\n"
+            "Use the results above to answer if they are sufficient. "
+            "Only call web_search_tool again if there is a specific, unresolved gap "
+            "that the above results do not cover. If you do search again, the new "
+            "query MUST target a distinctly different angle, fact, or sub-topic — "
+            "not a rephrasing or near-duplicate of any query already searched above. "
+            "Do not search again just to confirm or restate what you already have."
         )
 
         return {"messages": [SystemMessage(content=summary_text)]}
@@ -208,9 +252,8 @@ def run_agent(query: str, session_id: str):
 
 
 if __name__ == "__main__":
-    query = (
-        "state which of the current claude model is best for building websites in 2026?"
-    )
+    query = "Detail the performance benchmarks of Retrieval-Aware Fine-Tuning (RAFT) techniques compared to standard RAG pipelines in recent domain-specific evaluations."
 
-    result, _ = run_agent(query, "98l367h7lk")
-    print(result)
+    result, raw = run_agent(query, "852ujnrdfc")
+    print(len(raw))
+    # print(result)

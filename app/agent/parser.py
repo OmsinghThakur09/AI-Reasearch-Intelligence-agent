@@ -5,8 +5,9 @@ search agent returns agent.invoke() that contains list of messages (Human messag
 to store search result and its metadata(url, title, snippet) we need to parse it.
 """
 
-from langchain_core.messages import ToolMessage, AIMessage
+from langchain_core.messages import ToolMessage, SystemMessage
 import uuid
+import re
 import json
 
 
@@ -20,6 +21,38 @@ def helper_toolmessage_parser(toolmessage):
             return value
 
 
+def helper_systemmessage_parser(systemmessage):
+    """
+    SystemMessage content is plain text, not JSON. It looks like:
+
+    query: <query text>
+     url: <url>, title: <title>
+     content: <content text>
+
+    repeated for each search result block. This extracts url/title/content
+    from each block using regex.
+    """
+    if not systemmessage:
+        return []
+
+    # Each block starts with "url:" and ends right before the next "query:" or "url:" or end of string
+    pattern = re.compile(
+        r"url:\s*(?P<url>\S+?),\s*title:\s*(?P<title>.*?)\n\s*content:\s*(?P<content>.*?)(?=\n\s*query:|\Z)",
+        re.DOTALL,
+    )
+
+    results = []
+    for match in pattern.finditer(systemmessage):
+        results.append(
+            {
+                "url": match.group("url").strip().rstrip(","),
+                "title": match.group("title").strip(),
+                "content": match.group("content").strip(),
+            }
+        )
+    return results
+
+
 def parse_agent_output(agent_output: dict):
     """
     Returns: (source_urls, raw_docs)
@@ -30,6 +63,12 @@ def parse_agent_output(agent_output: dict):
     raw_docs = []
 
     for msg in messages:
+        if isinstance(msg, SystemMessage):
+            results = helper_systemmessage_parser(msg.content)
+            for item in results:
+                source.append(item["url"])
+                raw_docs.append(item)
+
         if isinstance(msg, ToolMessage):
             # Tavilysearch tool returns list of result dicts inside Toolmessage.content
 
@@ -47,24 +86,17 @@ def parse_agent_output(agent_output: dict):
                     }
                 )
 
-    return list(set(source)), raw_docs  # type: ignore
-
-
-def aianswer_parser(output: dict):
-    "to parse only ai message that dont contain any tool calls"
-    messages = output["messages"]
-
-    for message in messages:
-        if isinstance(message, AIMessage):
-            return message.content
+    return source, raw_docs  # type: ignore
 
 
 if __name__ == "__main__":
     from app.agent.search_agent_V2 import run_agent
 
-    query = "who won last IPL tournament?"
-    query_id = uuid.UUID("70b2a0a2-56df-42d3-abe0-d8914a0a392c")
+    query = "What were the key findings and criticisms of the most recent peer-reviewed study on room-temperature superconductors published this year?"
+    query_id = uuid.UUID("70b2a0a2-56df-02d3-abe0-d9914a0a392c")
 
-    result, _ = run_agent(query, "124225jk3")
+    result, _ = run_agent(query, "02")
 
-    print(parse_agent_output(result))
+    # print(parse_agent_output(result))
+    sources, metadata = parse_agent_output(result)
+    print(len(sources), len(metadata))

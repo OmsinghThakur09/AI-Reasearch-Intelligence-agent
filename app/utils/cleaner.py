@@ -125,13 +125,14 @@ def clean(raw_texts: list[str]) -> list[dict]:
 
 if __name__ == "__main__":
     from app.agent.search_agent_V2 import run_agent
+    from app.agent.parser import parse_agent_output
 
-    query = (
-        "Detail the performance benchmarks of Retrieval-Aware Fine-Tuning (RAFT) "
-        "techniques compared to standard RAG pipelines in recent domain-specific evaluations."
-    )
-    result, raw = run_agent(query, "963okmjnbvcx")
+    query = "Detail the performance benchmarks of Retrieval-Aware Fine-Tuning (RAFT) techniques compared to standard RAG pipelines in recent domain-specific evaluations."
+    result, raw = run_agent(query, "741ok8465mdfg")
 
     print("raw content length:", len(raw))
     raw_clean_dict = clean(raw)
     print("cleaned length:", len(raw_clean_dict))
+
+    _, metadata = parse_agent_output(result)
+    print("length of metadat:", len(metadata))

@@ -6,7 +6,6 @@ to store search result and its metadata(url, title, snippet) we need to parse it
 """
 
 from langchain_core.messages import ToolMessage, SystemMessage
-import uuid
 import re
 import json
 
@@ -37,7 +36,7 @@ def helper_systemmessage_parser(systemmessage):
 
     # Each block starts with "url:" and ends right before the next "query:" or "url:" or end of string
     pattern = re.compile(
-        r"url:\s*(?P<url>\S+?),\s*title:\s*(?P<title>.*?)\n\s*content:\s*(?P<content>.*?)(?=\n\s*query:|\Z)",
+        r"url:\s*(?P<url>\S+?),\s*title:\s*(?P<title>.*?)\n\s*content:\s*(?P<content>.*?)(?=\n\s*url:|\n\s*query:|\Z)",
         re.DOTALL,
     )
 
@@ -92,10 +91,9 @@ def parse_agent_output(agent_output: dict):
 if __name__ == "__main__":
     from app.agent.search_agent_V2 import run_agent
 
-    query = "What were the key findings and criticisms of the most recent peer-reviewed study on room-temperature superconductors published this year?"
-    query_id = uuid.UUID("70b2a0a2-56df-02d3-abe0-d9914a0a392c")
+    query = "Detail the performance benchmarks of Retrieval-Aware Fine-Tuning (RAFT) techniques compared to standard RAG pipelines in recent domain-specific evaluations"
 
-    result, _ = run_agent(query, "02")
+    result, _ = run_agent(query, "0hgrtcgkbhg2")
 
     # print(parse_agent_output(result))
     sources, metadata = parse_agent_output(result)

@@ -48,7 +48,7 @@ def save_sources(q_id: uuid.UUID, metadatas: list):
             source = Source(
                 query_id=q_id,
                 url=metadata.get("url", ""),
-                snippet=metadata.get("content", ""),
+                snippet=metadata.get("content", "")[:100],
             )
             session.add(source)
         session.commit()

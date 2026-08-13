@@ -1,22 +1,26 @@
 # app/agent/search_agent_V2.py
 
 """
-this script builds custom ReAct-style langgraph agent, that optimizes user query, uses custom Tavily web searching tool
-to search optimized queries over web and returns its result.
+this script builds a langgraph agent that optimizes the user's query, searches
+the optimized sub-queries over the web concurrently, then runs a deterministic
+(non-LLM) sufficiency check that decides whether the collected content is
+enough or whether the top thin sources need their full page fetched.
 
 Flow:
-    START -> optimize_query -> run_search -> agent -> (loop to tools, or end)
+    START -> optimize_node -> search_node -> check_and_escalate_node -> END
 
-this version manually starts from optimizing user query into 1-3 keyword focused sub-queries,
-then web search optimized queries then performs its reasoning to descide wether more searching needs or not. it ensures that
-agent never skips search tool even for simpler user query.
+no tool-calling loop: the "decide if we have enough" step used to be a
+second LLM call (redundant with the final RAG answer generation downstream).
+that judgment is now a rule-based check on content length instead, so the
+agent still behaves adaptively (search once, then optionally escalate to full
+pages for weak sources) without paying for a second, unused LLM-generated
+answer every run.
 """
 
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.graph import StateGraph, START
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 
 import sqlite3
@@ -26,103 +30,70 @@ from typing import TypedDict, Annotated
 from datetime import datetime
 
 from config import GROQ_API_KEY
-from app.agent.search_tool import make_search_tool, web_search_executor
+from app.agent.search_tool import web_search_executor, fetch_full_pages
 
 MODEL = "llama-3.3-70b-versatile"
 
 conn = sqlite3.connect("checkpoints.sqlite", check_same_thread=False)
 memory = SqliteSaver(conn)
+
 MAX_QUERIES = 3
+# sufficiency / escalation thresholds
+SUFFICIENT_CHARS = (
+    1200  # combined snippet length across all sources considered "enough"
+)
+THIN_CHARS = 250  # a source's snippet shorter than this is considered "thin"
+MAX_ESCALATE = 2  # fetch full page for at most this many thin sources per run
 
 
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     optimized_queries: list
+    search_results: list
 
 
 current_date = datetime.now().strftime("%B %d, %Y")
 
 OPTIMIZE_SYSTEM_PROMPT = (
     f"You are a search query planner for a research agent, Today's current date is {current_date}"
-    + """Always
-use this date as the absolute baseline anchor for the current year and any relative time calculations (e.g., 'yesterday', 'next month').
+    + """Always use this date as the absolute baseline anchor for the current year and any relative time calculations (e.g., 'yesterday', 'next month').
 
-Given the user's question, output a JSON object with a single key "queries",
-containing an array of 1 to 3 focused, keyword-rich search queries.
+    Given the user's question, output a JSON object with a single key "queries",
+    containing an array of 1 to 3 focused, keyword-rich search queries.
 
-A "sub-topic" means a distinct entity, item, or thing being discussed —
-not a different angle, facet, or aspect of the same single concept.
+    A "sub-topic" means a distinct entity, item, or thing being discussed —
+    not a different angle, facet, or aspect of the same single concept.
 
-Rules:
-- If the question asks about ONE concept, thing, or entity — even if the
-  question uses open-ended phrasing like "explain", "what is", or "how does
-  X work" — output exactly ONE query. Do not split a single concept into
-  multiple angles or facets of itself.
-- Only output more than one query if the question explicitly names or implies
-  multiple distinct things (e.g. comparing two items, listing multiple
-  entities, or asking about separate causes/effects/solutions/parts of a
-  larger topic).
-- Respond with ONLY the JSON object. No explanation, no markdown, no extra text.
+    Rules:
+    - If the question asks about ONE concept, thing, or entity — even if the
+      question uses open-ended phrasing like "explain", "what is", or "how does
+      X work" — output exactly ONE query. Do not split a single concept into
+      multiple angles or facets of itself.
+    - Only output more than one query if the question explicitly names or implies
+      multiple distinct things (e.g. comparing two items, listing multiple
+      entities, or asking about separate causes/effects/solutions/parts of a
+      larger topic).
+    - Respond with ONLY the JSON object. No explanation, no markdown, no extra text.
 
-Example 1 (single concept — one query, even though phrased broadly):
-Question: "explain how photosynthesis works in plants"
-Output:
-{
-  "queries": ["photosynthesis process in plants"]
-}
-
-Example 2 (single concept — one query):
-Question: "what is quantum computing"
-Output:
-{
-  "queries": ["quantum computing explained"]
-}
-
-Example 3 (genuinely multiple distinct things — split):
-Question: "compare RAG and multi-agent RAG for legal document analysis"
-Output:
-{
-  "queries": ["RAG vs multi-agent RAG comparison", "multi-agent RAG legal document analysis use case"]
-}
-
-Example 4 (genuinely multiple distinct things — split):
-Question: "what are the causes, effects, and solutions for climate change"
-Output:
-{
-  "queries": ["causes of climate change", "effects of climate change", "solutions to climate change"]
-}
-"""
+    Note: check query before optimizing, if query contains keyword or subtopic that doesn't exist at all then dont optimize it.
+    """
 )
-
-AGENT_SYSTEM_PROMPT = """You are a research assistant answering the user's question using search results already provided in this conversation.
-
-Before calling web_search_tool again, check the full conversation history for
-queries that were already searched. Do not issue a new search query that is a
-rephrasing, synonym, or near-duplicate of any prior query — this wastes calls
-and returns overlapping results. Only search again if you can name a specific
-piece of missing information the existing results do not cover.
-
-If the existing results are enough to answer the question, answer directly
-without calling any tool."""
 
 
 def build_agent():
-    "build the graph: optimize -> concurrent search -> agent (loop or end)"
+    "build the graph: optimize -> concurrent search -> deterministic sufficiency/escalation check -> end"
 
-    tool, raw_content, seen_urls = make_search_tool()
-    tools = [tool]
+    raw_content = []
+    subqueries = []
+    seen_urls = set()
+    url_index_map: dict[str, int] = (
+        {}
+    )  # url -> its position in raw_content, for escalation to overwrite later
 
-    # planner llm: no tool call only plain llm to optimize user query
+    # planner llm: plain llm call to optimize user query.
     planner_llm = ChatGroq(api_key=GROQ_API_KEY, model=MODEL, temperature=0).bind(
         response_format={"type": "json_object"}
     )
-
-    # tool bound llm: used for normal ReAct resoning after first search
-    agent_llm = ChatGroq(api_key=GROQ_API_KEY, model=MODEL, temperature=0).bind_tools(
-        tools
-    )
-
-    tool_node = ToolNode(tools)
 
     def optimize_query_node(state: AgentState):
         "a node for user query optimization before web search"
@@ -142,17 +113,21 @@ def build_agent():
         if not queries:
             queries = [user_query]
 
+        subqueries.extend(queries)
         return {"optimized_queries": queries}
 
     def search_node(state: AgentState):
-        "a node that uses web search tool to search optimize queries concurrently"
+        "a node that uses web search (snippet-only, no raw page) concurrently for each optimized query"
 
         queries = state.get("optimized_queries", [])
 
         results_by_query = []
         with concurrent.futures.ProcessPoolExecutor() as executor:
             future_to_query = {
-                executor.submit(web_search_executor, q): q for q in queries
+                executor.submit(
+                    web_search_executor, q, max_result=5 if len(queries) == 1 else 2
+                ): q
+                for q in queries
             }
 
             for future in concurrent.futures.as_completed(future_to_query):
@@ -173,7 +148,8 @@ def build_agent():
                         if url:
                             seen_urls.add(url)
 
-                        raw_content.append(item["raw_content"])
+                        url_index_map[url] = len(raw_content)
+                        # raw_content.append(item["raw_content"])  # "" by default (snippet-only search)
                         metadata.append(
                             {
                                 "url": url,
@@ -187,57 +163,62 @@ def build_agent():
                 except Exception as e:
                     results_by_query.append({"query": q, "error": str(e)})
 
-        summary_lines = ["Search results for the optimized queries:\n"]
-        for item in results_by_query:
-            summary_lines.append(f"query: {item['query']}")
+        return {"search_results": results_by_query}
 
-            if "error" in item:
-                summary_lines.append(f" (failed to search: {item['error']})")
+    def check_and_escalate_node(state: AgentState):
+        "deterministic (non-LLM) sufficiency check: decides if collected snippets are"
+        "enough, and if not, fetches the full page for the top few thin sources only."
 
-            else:
-                for r in item["results"]:
-                    summary_lines.append(f" url: {r['url']}, title: {r['title']}")
-                    summary_lines.append(f" content: {r['content']}")
+        results_by_query = state.get("search_results", [])
 
-        summary_lines.append("")
+        all_results = [
+            r for item in results_by_query if "results" in item for r in item["results"]
+        ]
 
-        summary_text = "\n".join(summary_lines)
-        summary_text += (
-            f"\n\nQueries already searched: {queries}\n\n"
-            "Use the results above to answer if they are sufficient. "
-            "Only call web_search_tool again if there is a specific, unresolved gap "
-            "that the above results do not cover. If you do search again, the new "
-            "query MUST target a distinctly different angle, fact, or sub-topic — "
-            "not a rephrasing or near-duplicate of any query already searched above. "
-            "Do not search again just to confirm or restate what you already have."
-        )
+        # length of all fetched snippets
+        total_chars = sum(len(r["content"]) for r in all_results)
 
-        return {"messages": [SystemMessage(content=summary_text)]}
+        escalated_urls = []
+        if total_chars < SUFFICIENT_CHARS:
+            thin_sources = [r for r in all_results if len(r["content"]) < THIN_CHARS]
+            escalated_urls = [r["url"] for r in thin_sources if r["url"]][:MAX_ESCALATE]
 
-    def agent_node(state: AgentState):
-        "A node that acts as a ReAct agent"
-        response = agent_llm.invoke(state["messages"])
-        return {"messages": [response]}
+            if escalated_urls:
+                fetched = fetch_full_pages(escalated_urls)
+                for url, content in fetched.items():
+                    idx = url_index_map.get(url)
+                    if idx is not None:
+                        raw_content.append(content)
+
+        summary_lines = [
+            f"Collected {len(all_results)} source(s), {total_chars} total snippet characters."
+        ]
+        if escalated_urls:
+            summary_lines.append(
+                f"Snippets were thin, fetched full page content for: {escalated_urls}"
+            )
+        else:
+            summary_lines.append(
+                "Snippet content judged sufficient, no full-page fetch needed."
+            )
+
+        return {"messages": [SystemMessage(content="\n".join(summary_lines))]}
 
     graph = StateGraph(AgentState)
     graph.add_node("optimize_node", optimize_query_node)
     graph.add_node("search_node", search_node)
-    graph.add_node("tools", tool_node)
-    graph.add_node("agent_node", agent_node)
+    graph.add_node("check_and_escalate_node", check_and_escalate_node)
 
-    graph.add_edge(START, "optimize_node")  # every run starts here
-    graph.add_edge(
-        "optimize_node", "search_node"
-    )  # query optimizes befroe going to search
-    graph.add_edge("search_node", "agent_node")  # tool call is always executed
-    graph.add_conditional_edges("agent_node", tools_condition)
-    graph.add_edge("tools", "agent_node")  # result goes to agent for reasoning
+    graph.add_edge(START, "optimize_node")
+    graph.add_edge("optimize_node", "search_node")
+    graph.add_edge("search_node", "check_and_escalate_node")
+    graph.add_edge("check_and_escalate_node", END)
 
     compiled = graph.compile(checkpointer=memory)
-    return compiled, raw_content
+    return compiled, raw_content, subqueries
 
 
-GLOBAL_AGENT, RAW_CONTENT = build_agent()
+GLOBAL_AGENT, RAW_CONTENT, SUB_QUERIES = build_agent()
 
 
 def run_agent(query: str, session_id: str):
@@ -248,12 +229,15 @@ def run_agent(query: str, session_id: str):
         config=config,
     )
 
-    return result, RAW_CONTENT
+    return result, RAW_CONTENT, SUB_QUERIES
 
 
 if __name__ == "__main__":
-    query = "Detail the performance benchmarks of Retrieval-Aware Fine-Tuning (RAFT) techniques compared to standard RAG pipelines in recent domain-specific evaluations."
+    query = "What are the primary efficiency limitations identified in Perovskite-Silicon tandem solar cells according to recent materials science literature?"
 
-    result, raw = run_agent(query, "852ujnrdfc")
+    result, raw, sub_queries = run_agent(query, "76uy")
+    print(result)
     print(len(raw))
-    # print(result)
+
+"Retrieval-Aware Fine-Tuning evaluation in domain-specific tasks"
+"Domain-specific performance of RAFT techniques"

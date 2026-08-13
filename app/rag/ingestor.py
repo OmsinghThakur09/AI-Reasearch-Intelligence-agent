@@ -11,18 +11,29 @@ from langchain_chroma import Chroma
 import hashlib
 
 CHROMA_DIR = "./chroma_db"
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
+
+# module-level cache so the embedding model is loaded ONCE per process,
+# not on every get_vectorstore() call
+_embeddings = None
+_vectorstore = None
 
 
 def get_vectorstore() -> Chroma:
     """Function to load existing ChromaDB vectorestore or load new if first run"""
+    global _embeddings, _vectorstore
 
-    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+    if _vectorstore is None:
+        _embeddings = HuggingFaceEmbeddings(
+            model_name=EMBEDDING_MODEL,
+            model_kwargs={"device": "cuda"},  # use GTX 1650 instead of CPU
+        )
+        _vectorstore = Chroma(
+            embedding_function=_embeddings,
+            persist_directory=CHROMA_DIR,
+        )
 
-    return Chroma(
-        embedding_function=embeddings,
-        persist_directory=CHROMA_DIR,
-    )
+    return _vectorstore
 
 
 def ingest_clean_text(clean_text: list[str], metadata: list[dict]) -> None:
@@ -32,7 +43,7 @@ def ingest_clean_text(clean_text: list[str], metadata: list[dict]) -> None:
     if not clean_text:
         return
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
     chunks = splitter.create_documents(clean_text, metadatas=metadata)
 
     # to avoid duplicate vector generation, passing id into add_documents funtion.

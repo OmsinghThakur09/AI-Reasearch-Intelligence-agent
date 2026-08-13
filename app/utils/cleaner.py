@@ -128,7 +128,7 @@ if __name__ == "__main__":
     from app.agent.parser import parse_agent_output
 
     query = "Detail the performance benchmarks of Retrieval-Aware Fine-Tuning (RAFT) techniques compared to standard RAG pipelines in recent domain-specific evaluations."
-    result, raw = run_agent(query, "741ok8465mdfg")
+    result, raw, _ = run_agent(query, "741ok8465mdfg")
 
     print("raw content length:", len(raw))
     raw_clean_dict = clean(raw)

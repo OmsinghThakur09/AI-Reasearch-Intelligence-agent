@@ -8,12 +8,11 @@ from app.db.queries import (
     save_agent_actions,
     update_error_message,
 )
-from app.agent.search_agent import run_agent
-from app.agent.parser import parse_agent_output, aianswer_parser
-from app.agent.search_tool import web_search_executor
+from app.agent.search_agent_V2 import run_agent
+from app.agent.parser import parse_agent_output
 from app.utils.cleaner import clean
 from app.rag.ingestor import ingest_clean_text
-from app.rag.chain import build_rag_chain
+from app.rag.chain import retrieve_by_subqueries, build_llm_call
 import uuid
 
 # simple in-memory store for last question/answer per session_id.
@@ -33,40 +32,14 @@ def run_research_pipeline(query: str, session_id: str | None = None):
     try:
         # step 2: run search agent
         s_id = session_id or str(uuid.uuid4())
-        agent_output, raw_content = run_agent(query, s_id)
+        agent_output, raw_content, sub_queries = run_agent(query, s_id)
 
         # step 3: parse langgraph's agent output
-        sources, metadatas = parse_agent_output(agent_output)
+        sources, raw_docs = parse_agent_output(agent_output)
 
         # step 4: log every agent tool call to db
         save_agent_actions(agent_output.get("messages", ""), query_id)
 
-        if len(metadatas) <= 0:
-            "if agent dont use search tool to answer"
-
-            if session_id is not None:
-                "agent skipped search tool but question is follow-up"
-                answer = aianswer_parser(agent_output)
-
-                update_query_status(query_id, "completed")
-
-                SESSION_LAST_QA[s_id] = {"question": query, "answer": answer}
-
-                return {
-                    "answer": answer,
-                    "sources": sources,
-                    "query_id": str(query_id),
-                    "session_id": str(s_id),
-                }
-
-            raw_content, metadatas = web_search_executor(query)
-            sources = []
-            for item in metadatas:
-                sources.append(item["url"])
-
-        # step 4b: build augmented query with previous turn's Q&A (if any).
-        # used only for retrieval + final answer generation, NOT for web search,
-        # so we don't pollute search terms with old context.
         if previous_qa is not None:
             augmented_query = (
                 f"Previous question: {previous_qa['question']}\n"
@@ -77,10 +50,17 @@ def run_research_pipeline(query: str, session_id: str | None = None):
             augmented_query = query
 
         # step 5: clean raw web page result into clean text
-        raw_clean_dict = clean(raw_content)
+        if len(raw_content) > 0:
+            # if escalated node returned full raw web page
+            for url, raw in raw_content:
+                for item in raw_docs:
+                    if url in item.keys():
+                        item["url"] = raw
+
+        raw_clean_dict = clean([row["content"] for row in raw_docs])
 
         # step 6: save documents in db
-        save_documents(query_id, metadatas, raw_clean_dict)
+        save_documents(query_id, raw_docs, raw_clean_dict)
 
         # step 7: Ingest clean text into ChromaDB
         ingest_clean_text(
@@ -90,18 +70,18 @@ def run_research_pipeline(query: str, session_id: str | None = None):
                     "url": row["url"],
                     "session_id": str(s_id),
                 }
-                for row in metadatas
+                for row in raw_docs
             ],
         )
 
         # step 8: retreive relevant chunks and send to LLM model for final answer
-        rag_chain = build_rag_chain(str(s_id))
-        rag_result = rag_chain.invoke({"input": augmented_query})
+        context = retrieve_by_subqueries(sub_queries, s_id)
 
-        answer = rag_result["answer"]
+        rag_chain = build_llm_call()
+        answer = rag_chain.invoke({"input": augmented_query, "context": context})
 
         # step 9: save sources in db
-        save_sources(query_id, metadatas)
+        save_sources(query_id, raw_docs)
 
         # step 10: update status of user query
         update_query_status(query_id, "completed")
@@ -124,7 +104,7 @@ def run_research_pipeline(query: str, session_id: str | None = None):
 
 
 if __name__ == "__main__":
-    query = "list down the progress in Quantum Computing in 2026"
+    query = "Summarize the core findings of the 2026 academic paper titled 'The Impact of Quantum Teleportation on Global Supply Chains'"
 
     result = run_research_pipeline(query)
     print(result["answer"])

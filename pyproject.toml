@@ -1,2 +1,20 @@
+[project]
+name = "ai-research-intelligence-agent"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.13.0",
+    "torchvision>=0.28.0",
+]
+
 [too.fastapi]
 entrypoint = "app.api:routes.py"
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }

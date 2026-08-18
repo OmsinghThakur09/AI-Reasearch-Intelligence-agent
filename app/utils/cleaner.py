@@ -124,7 +124,7 @@ def clean(raw_texts: list[str]) -> list[dict]:
 
 
 if __name__ == "__main__":
-    from app.agent.search_agent_V2 import run_agent
+    from app.agent.search_agent import run_agent
     from app.agent.parser import parse_agent_output
 
     query = "Detail the performance benchmarks of Retrieval-Aware Fine-Tuning (RAFT) techniques compared to standard RAG pipelines in recent domain-specific evaluations."

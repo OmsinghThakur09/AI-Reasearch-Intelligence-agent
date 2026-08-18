@@ -41,7 +41,7 @@ def parse_agent_output(agent_output: dict):
 
 
 if __name__ == "__main__":
-    from app.agent.search_agent_V2 import run_agent
+    from app.agent.search_agent import run_agent
 
     query = "How universe was born?"
 

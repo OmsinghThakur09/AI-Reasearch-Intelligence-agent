@@ -62,7 +62,7 @@ def retrieve_by_subqueries(subqueries: list[str], session_id: str | None = None)
 
     def search(query: str):
         return vectorstore.similarity_search(
-            query, k=K_PER_SUBQUERY if len(subqueries) >= 1 else 5, **search_kwargs
+            query, k=5 if len(subqueries) == 1 else K_PER_SUBQUERY, **search_kwargs
         )
 
     all_docs = []

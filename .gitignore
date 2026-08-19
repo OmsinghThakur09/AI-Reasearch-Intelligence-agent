@@ -84,3 +84,5 @@ scratch/
 
 # state memory
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal

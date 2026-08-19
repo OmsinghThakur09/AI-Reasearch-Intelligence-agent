@@ -8,7 +8,7 @@ from app.db.queries import (
     save_agent_actions,
     update_error_message,
 )
-from app.agent.search_agent_V2 import run_agent
+from app.agent.search_agent import run_agent
 from app.agent.parser import parse_agent_output
 from app.utils.cleaner import clean
 from app.rag.ingestor import ingest_clean_text
@@ -19,19 +19,31 @@ import uuid
 SESSION_LAST_QA: dict[str, dict[str, str]] = {}
 
 
-def run_research_pipeline(query: str, session_id: str | None = None):
+# generator function
+def stream_research_pipeline(query: str, session_id: str | None = None):
     """
-    complete pipeline from user query to final answer.
+    generator function same as before but yields different events instead of complete final answer.
+    to stream token one by one from llm to user's web browser we need generator function that able to send data
+    as soon as generated and sent by llm.
+
+    output format:
+    Yields dicts of the shape {"event": ..., "data": ...}:
+        "session" -> {"session_id": ..., "query_id": ...}   (sent first)
+        "token"   -> "<piece of the answer>"                (sent repeatedly)
+        "done"    -> {"answer", "sources", "query_id", "session_id"}
+        "error"   -> "<error message>"
     """
     # step 1: save user query in db and gets UUID
     query_id = save_user_query(query)
 
     # step 1b: look up previous turn's Q&A for this session, if any
     previous_qa = SESSION_LAST_QA.get(session_id) if session_id else None
+    s_id = session_id or str(uuid.uuid4())
+
+    yield {"event": "session", "data": {"session_id": s_id, "query_id": str(query_id)}}
 
     try:
         # step 2: run search agent
-        s_id = session_id or str(uuid.uuid4())
         agent_output, raw_content, sub_queries = run_agent(query, s_id)
 
         # step 3: parse langgraph's agent output
@@ -76,10 +88,23 @@ def run_research_pipeline(query: str, session_id: str | None = None):
 
         # step 8: retreive relevant chunks and send to LLM model for final answer
         context = retrieve_by_subqueries(sub_queries, s_id)
-
         rag_chain = build_llm_call()
-        answer = rag_chain.invoke({"input": augmented_query, "context": context})
 
+        answer_parts = []
+        for chunk in rag_chain.stream({"input": augmented_query, "context": context}):
+            # chunks can be return in the form of langchain message object thats why we need getattr to extract chunk from content block of message object
+            token = (
+                chunk
+                if isinstance(chunk, str)
+                else getattr(chunk, "content", str(chunk))
+            )
+            if not token:
+                continue
+
+            answer_parts.append(token)
+            yield {"event": "token", "data": token}
+
+        answer = "".join(answer_parts)
         # step 9: save sources in db
         save_sources(query_id, raw_docs)
 
@@ -90,21 +115,38 @@ def run_research_pipeline(query: str, session_id: str | None = None):
         # session, overwriting the previous one (we only keep one turn back)
         SESSION_LAST_QA[s_id] = {"question": query, "answer": answer}
 
-        return {
-            "answer": answer,
-            "sources": sources,
-            "query_id": str(query_id),
-            "session_id": str(s_id),
+        yield {
+            "event": "done",
+            "data": {
+                "answer": answer,
+                "sources": sources,
+                "query_id": str(query_id),
+                "session_id": str(s_id),
+            },
         }
 
     except Exception as e:
         update_query_status(query_id, "failed")
         update_error_message(query_id, str(e))
+        yield {"event": "error", "data": str(e)}
         raise
 
 
+# normal function
+def run_research_pipeline(query: str, session_id: str | None = None):
+    """
+    complete pipeline from user query to final answer.
+    """
+    final = None
+    for event in stream_research_pipeline(query, session_id):
+        if event["event"] == "done":
+            final = event["data"]
+
+    return final
+
+
 if __name__ == "__main__":
-    query = "Summarize the core findings of the 2026 academic paper titled 'The Impact of Quantum Teleportation on Global Supply Chains'"
+    query = "Quantum computing advancements 2026"
 
     result = run_research_pipeline(query)
     print(result["answer"])

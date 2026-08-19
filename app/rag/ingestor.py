@@ -43,7 +43,7 @@ def ingest_clean_text(clean_text: list[str], metadata: list[dict]) -> None:
     if not clean_text:
         return
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=100)
     chunks = splitter.create_documents(clean_text, metadatas=metadata)
 
     # to avoid duplicate vector generation, passing id into add_documents funtion.

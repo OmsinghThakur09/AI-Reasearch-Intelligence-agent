@@ -26,6 +26,7 @@ def web_search_executor(query: str, max_result=2, include_raw_content: bool = Fa
     raw_results = _tavily.raw_results(
         query=query,
         max_results=max_result,
+        exclude_domains=["youtube.com"],
         include_raw_content="text" if include_raw_content else False,  # type: ignore
     )
 

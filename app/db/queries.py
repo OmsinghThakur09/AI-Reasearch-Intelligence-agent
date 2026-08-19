@@ -100,3 +100,8 @@ def save_agent_actions(messages: list, query_id: uuid.UUID):
             )
 
         session.commit()
+
+
+def get_query_history(limit: int = 20) -> list:
+    with Sessionlocal() as session:
+        return session.query(Query).order_by(Query.created_at.desc()).limit(limit).all()

@@ -7,14 +7,11 @@ the optimized sub-queries over the web concurrently, then runs a deterministic
 enough or whether the top thin sources need their full page fetched.
 
 Flow:
-    START -> optimize_node -> search_node -> check_and_escalate_node -> END
+    START -> structural_check_node -> optimize_node -> validity_node -> search_node -> check_and_escalate_node -> END
 
-no tool-calling loop: the "decide if we have enough" step used to be a
-second LLM call (redundant with the final RAG answer generation downstream).
-that judgment is now a rule-based check on content length instead, so the
-agent still behaves adaptively (search once, then optionally escalate to full
-pages for weak sources) without paying for a second, unused LLM-generated
-answer every run.
+structural_check_node rejects empty/too-short/gibberish input before
+any LLM call is made, and validity_node halts the run right after
+optimize_node if the LLM judged the query's topic to not exist at all.
 """
 
 from langchain_groq import ChatGroq
@@ -276,7 +273,7 @@ def build_agent():
                 for url, content in fetched.items():
                     idx = url_index_map.get(url)
                     if idx is not None:
-                        raw_content.append(content)
+                        raw_content.append((url, content))
 
         summary_lines = [
             f"Collected {len(all_results)} source(s), {total_chars} total snippet characters."

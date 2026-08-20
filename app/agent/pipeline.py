@@ -55,7 +55,7 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
         if previous_qa is not None:
             augmented_query = (
                 f"Previous question: {previous_qa['question']}\n"
-                f"Previous answer: {previous_qa['answer']}\n"
+                f"Previous answer: {previous_qa['answer']}\n\n"
                 f"Current question: {query}"
             )
         else:
@@ -80,6 +80,7 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
             metadata=[
                 {
                     "url": row["url"],
+                    "query_id": str(query_id),
                     "session_id": str(s_id),
                 }
                 for row in raw_docs
@@ -87,7 +88,7 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
         )
 
         # step 8: retreive relevant chunks and send to LLM model for final answer
-        context = retrieve_by_subqueries(sub_queries, s_id)
+        context = retrieve_by_subqueries(sub_queries, str(query_id), session_id=s_id)
         rag_chain = build_llm_call()
 
         answer_parts = []

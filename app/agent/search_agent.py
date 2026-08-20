@@ -30,7 +30,7 @@ from datetime import datetime
 from config import GROQ_API_KEY
 from app.agent.search_tool import web_search_executor, fetch_full_pages
 
-MODEL = "openai/gpt-oss-120b"
+MODEL = "qwen/qwen3.6-27b"
 
 conn = sqlite3.connect("checkpoints.sqlite", check_same_thread=False)
 memory = SqliteSaver(conn)
@@ -51,6 +51,7 @@ class AgentState(TypedDict):
     optimized_queries: list
     search_results: list
     topic_valid: bool
+    raw_content: list
 
 
 class EmptyQueryError(Exception):
@@ -69,87 +70,48 @@ OPTIMIZE_SYSTEM_PROMPT = """You are a search query planner for a research agent.
 
 Today's date is: {current_date}
 
-Given the user's question, output a JSON object with exactly two keys:
-- "valid": boolean. true if the question's core topic, keyword, or entity is
-  something that genuinely exists (a real concept, technology, person, event,
-  etc.). false if the question is built around a keyword or subtopic that is
-  made up / does not exist at all.
-- "queries": an array of 1 to 3 focused, keyword-rich search queries. If
-  "valid" is false, this MUST be an empty array — do not attempt to optimize
-  a query for a topic that does not exist.
+Output a JSON object with exactly three keys, IN THIS ORDER: "sub_topics", "valid", "queries".
 
-A "sub-topic" means a distinct entity, item, or thing being discussed —
-not a different angle, facet, or aspect of the same single concept.
+1. "sub_topics": list every distinct thing needing separate search coverage, BEFORE deciding anything else.
+   - A sub-topic is a separate NAMED entity being compared/listed (e.g. countries, products), OR a facet the question explicitly names (e.g. "causes, effects, and solutions").
+   - One concept explored broadly ("explain X", "how does X work") is ONE sub-topic, even if open-ended.
+   - Max 3 sub-topics; if more are named, keep only the 3 most central.
 
-Rules:
-- If the question asks about ONE concept, thing, or entity — even if the
-  question uses open-ended phrasing like "explain", "what is", or "how does
-  X work" — output exactly ONE query. Do not split a single concept into
-  multiple angles or facets of itself.
-- Only output more than one query if the question explicitly names or implies
-  multiple distinct things (e.g. comparing two items, listing multiple
-  entities, or asking about separate causes/effects/solutions/parts of a
-  larger topic).
-- Check the query BEFORE optimizing. If it contains a keyword or subtopic
-  that doesn't exist at all, set "valid" to false and "queries" to [].
-- Respond with ONLY the JSON object. No explanation, no markdown, no extra text.
+2. "valid": true if every sub-topic genuinely exists. false if the core topic is fabricated. If false, "queries" must be [].
 
-Example 1 (single concept — one query, even though phrased broadly):
+3. "queries": exactly ONE self-contained query PER sub-topic (1-3 total).
+   - Each query must stand alone with no other query for context.
+   - NEVER merge sub-topics into one combined query, even for "compare"/"summarize together" requests — synthesis happens later, not in the search.
+
+Respond with ONLY the JSON object.
+
+Example 1 (single concept, broad phrasing — one query):
 Question: "explain how photosynthesis works in plants"
-Output:
-{{
-  "valid": true,
-  "queries": ["photosynthesis process in plants"]
-}}
+{{"sub_topics": ["photosynthesis"], "valid": true, "queries": ["photosynthesis process in plants"]}}
 
-Example 2 (single concept — one query):
-Question: "what is quantum computing"
-Output:
-{{
-  "valid": true,
-  "queries": ["quantum computing explained"]
-}}
+Example 2 (named entities compared — one query PER entity, never combined):
+Question: "compare the economics of japan, russia and saudi arabia"
+{{"sub_topics": ["Japan", "Russia", "Saudi Arabia"], "valid": true, "queries": ["Japan economy 2026", "Russia economy 2026", "Saudi Arabia economy 2026"]}}
 
-Example 3 (genuinely multiple distinct things — split):
-Question: "compare RAG and multi-agent RAG for legal document analysis"
-Output:
-{{
-  "valid": true,
-  "queries": ["RAG vs multi-agent RAG comparison", "multi-agent RAG legal document analysis use case"]
-}}
-
-Example 4 (genuinely multiple distinct things — split):
+Example 3 (one topic, explicitly-named facets — split by facet):
 Question: "what are the causes, effects, and solutions for climate change"
-Output:
-{{
-  "valid": true,
-  "queries": ["causes of climate change", "effects of climate change", "solutions to climate change"]
-}}
+{{"sub_topics": ["causes of climate change", "effects", "solutions"], "valid": true, "queries": ["causes of climate change", "effects of climate change", "solutions to climate change"]}}
 
-Example 5 (topic/keyword does not exist — invalid, no queries):
+Example 4 (topic doesn't exist — invalid):
 Question: "explain how the Zorblatt Compression Algorithm reduces latency in neural networks"
-Output:
-{{
-  "valid": false,
-  "queries": []
-}}
+{{"sub_topics": ["Zorblatt Compression Algorithm"], "valid": false, "queries": []}}
 """.format(current_date=current_date)
 
 
 def build_agent():
-    "build the graph: optimize -> concurrent search -> deterministic sufficiency/escalation check -> end"
-
-    raw_content = []
-    subqueries = []
-    seen_urls = set()
-    url_index_map: dict[str, int] = (
-        {}
-    )  # url -> its position in raw_content, for escalation to overwrite later
+    """build the graph:
+    START -> structural_check_node -> optimize_node -> validity_node -> search_node -> check_and_escalate_node -> END
+    """
 
     # planner llm: plain llm call to optimize user query.
-    planner_llm = ChatGroq(api_key=GROQ_API_KEY, model=MODEL, temperature=0).bind(
-        response_format={"type": "json_object"}
-    )
+    planner_llm = ChatGroq(
+        api_key=GROQ_API_KEY, model=MODEL, temperature=0, reasoning_effort="default"
+    ).bind(response_format={"type": "json_object"})
 
     def structural_check_node(state: AgentState):
         "a node that will check for any empty, gibberish, or less than minimum word count query, if found then raises Exception"
@@ -169,7 +131,7 @@ def build_agent():
         return {}
 
     def optimize_query_node(state: AgentState):
-        "a node for user query optimization before web search"
+        "user query optimization before web search"
         user_query = state["messages"][-1].content
 
         response = planner_llm.invoke(
@@ -187,7 +149,6 @@ def build_agent():
         if is_valid and not queries:
             queries = [user_query]
 
-        subqueries.extend(queries)
         return {"optimized_queries": queries, "topic_valid": is_valid}
 
     def validity_check_node(state: AgentState):
@@ -206,7 +167,9 @@ def build_agent():
 
         queries = state.get("optimized_queries", [])
 
+        seen_urls = set()
         results_by_query = []
+
         with concurrent.futures.ProcessPoolExecutor() as executor:
             future_to_query = {
                 executor.submit(
@@ -220,12 +183,8 @@ def build_agent():
 
                 try:
                     items = future.result()
-
-                    # dedupe by url here, in the main process, against the SAME
-                    # seen_urls set used later by web_search_tool in the agent loop,
-                    # so a page returned by two different optimized queries (or
-                    # re-searched later) is only ever added to raw_content once
                     metadata = []
+
                     for item in items:
                         url = item["url"]
                         if url and url in seen_urls:
@@ -233,8 +192,6 @@ def build_agent():
                         if url:
                             seen_urls.add(url)
 
-                        url_index_map[url] = len(raw_content)
-                        # raw_content.append(item["raw_content"])  # "" by default (snippet-only search)
                         metadata.append(
                             {
                                 "url": url,
@@ -264,6 +221,7 @@ def build_agent():
         total_chars = sum(len(r["content"]) for r in all_results)
 
         escalated_urls = []
+        raw_content = []
         if total_chars < SUFFICIENT_CHARS:
             thin_sources = [r for r in all_results if len(r["content"]) < THIN_CHARS]
             escalated_urls = [r["url"] for r in thin_sources if r["url"]][:MAX_ESCALATE]
@@ -271,9 +229,7 @@ def build_agent():
             if escalated_urls:
                 fetched = fetch_full_pages(escalated_urls)
                 for url, content in fetched.items():
-                    idx = url_index_map.get(url)
-                    if idx is not None:
-                        raw_content.append((url, content))
+                    raw_content.append((url, content))
 
         summary_lines = [
             f"Collected {len(all_results)} source(s), {total_chars} total snippet characters."
@@ -304,10 +260,10 @@ def build_agent():
     graph.add_edge("check_and_escalate_node", END)
 
     compiled = graph.compile(checkpointer=memory)
-    return compiled, raw_content, subqueries
+    return compiled
 
 
-GLOBAL_AGENT, RAW_CONTENT, SUB_QUERIES = build_agent()
+GLOBAL_AGENT = build_agent()
 
 
 def run_agent(query: str, session_id: str):
@@ -318,7 +274,10 @@ def run_agent(query: str, session_id: str):
         config=config,
     )
 
-    return result, RAW_CONTENT, SUB_QUERIES
+    raw_content = result.get("raw_content", [])
+    sub_queries = result.get("optimized_queries", [])
+
+    return result, raw_content, sub_queries
 
 
 if __name__ == "__main__":

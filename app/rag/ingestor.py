@@ -55,4 +55,4 @@ def ingest_clean_text(clean_text: list[str], metadata: list[dict]) -> None:
     ]
 
     vectorstore = get_vectorstore()
-    vectorstore.add_documents(chunks, id=id)
+    vectorstore.add_documents(chunks, ids=id)

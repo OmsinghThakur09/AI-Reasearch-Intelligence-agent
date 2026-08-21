@@ -11,6 +11,7 @@
       - id: check-toml
       - id: check-json
       - id: check-added-large-files
+        args: ['--maxkb=2048']
       - id: check-merge-conflict
       - id: debug-statements
 

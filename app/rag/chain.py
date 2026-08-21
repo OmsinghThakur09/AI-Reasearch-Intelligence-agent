@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.rag.ingestor import get_vectorstore
 from config import GROQ_API_KEY
 from datetime import datetime
+from typing import Any
 
 current_date = datetime.now().strftime("%B %d, %Y")
 
@@ -58,18 +59,16 @@ def retrieve_by_subqueries(
     """
     vectorstore = get_vectorstore()
 
-    # chain.py — inside retrieve_by_subqueries
-    search_kwargs = {}
+    search_filter: dict[str, Any]
     if session_id is not None:
-        search_kwargs["filter"] = {
+        search_filter = {
             "$and": [
                 {"query_id": query_id},
                 {"session_id": session_id},
             ]
         }
-
     else:
-        search_kwargs["filter"] = search_kwargs["filter"] = {
+        search_filter = {
             "$and": [
                 {"query_id": query_id},
             ]
@@ -77,7 +76,9 @@ def retrieve_by_subqueries(
 
     def search(query: str):
         return vectorstore.similarity_search(
-            query, k=5 if len(subqueries) == 1 else K_PER_SUBQUERY, **search_kwargs
+            query,
+            k=5 if len(subqueries) == 1 else K_PER_SUBQUERY,
+            filter=search_filter,
         )
 
     all_docs = []
@@ -86,8 +87,6 @@ def retrieve_by_subqueries(
         for future in as_completed(futures):
             all_docs.extend(future.result())
 
-    # dedupe using (url, content) instead of doc.id, since doc.id can be
-    # None/unreliable depending on how documents were ingested
     seen_id = set()
     unique_docs = []
     for doc in all_docs:
@@ -95,7 +94,6 @@ def retrieve_by_subqueries(
             seen_id.add(doc.id)
             unique_docs.append(doc)
 
-    # format each chunk WITH its source url, so the LLM can actually cite it
     formatted_chunks = [
         f"{doc.page_content}\nSource: {doc.metadata.get('url', 'unknown')}"
         for doc in unique_docs

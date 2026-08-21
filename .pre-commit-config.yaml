@@ -38,9 +38,9 @@
   # MyPy
   # -----------------------------
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.16.1
+    rev: v1.16.1  # (Your version might be different)
     hooks:
       - id: mypy
-        language_version: python3.12
-        args:
-          - --ignore-missing-imports
+        additional_dependencies:
+          - types-requests
+          - pandas-stubs  # Good idea to add this too, just in case!

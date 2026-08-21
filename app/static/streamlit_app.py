@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 API_URL = "http://localhost:8000"
 
-TOKEN_REVEAL_DELAY = 0.010  # to delay streaming tokens
+TOKEN_REVEAL_DELAY = 0.0009  # to delay streaming tokens
 
 st.set_page_config(page_title="AI Research Agent", page_icon="🔎", layout="centered")
 
@@ -241,8 +241,7 @@ if st.session_state.pending_query and st.session_state.is_generating:
                         continue
 
                     if raw_line.startswith("data:"):
-                        data_str = raw_line.split("data:", 1)[1].strip()
-
+                        data_str = raw_line.split("data:", 1)[1]
                         if current_event == "session":
                             data = json.loads(data_str)
                             st.session_state.session_id = data[

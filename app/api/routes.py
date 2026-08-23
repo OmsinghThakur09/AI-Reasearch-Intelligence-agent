@@ -56,7 +56,7 @@ class ResearchResponse(BaseModel):
 
 def sse_format(event: str, data) -> str:
     "function to declare custom Server-Sent-Event"
-    payload = data if isinstance(data, str) else json.dumps(data)
+    payload = json.dumps(data)
     return f"event: {event}\ndata: {payload}\n\n"
 
 

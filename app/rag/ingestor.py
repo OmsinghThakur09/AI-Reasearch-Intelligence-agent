@@ -1,8 +1,8 @@
 # app/rag/ingestor.py
 """
-simple funtion to store emgeddings of cleaned web search results into ChromDB vectore store.
-input: cleaned_text + metadat
-output: vectore store(stored embeddings of input)
+simple function to store embeddings of cleaned web search results into ChromDB vectore store.
+input: clean_text + metadata
+vector store (stored embeddings of input)
 """
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -55,7 +55,11 @@ def ingest_clean_text(clean_text: list[str], metadata: list[dict]) -> None:
     # document having same id will be udated in vector store instead of duplicating.
 
     id = [
-        hashlib.sha256(chunk.page_content.encode("utf-8")).hexdigest()
+        hashlib.sha256(
+            f"{chunk.metadata.get('session_id', '')}|{chunk.metadata.get('query_id', '')}|{chunk.page_content}".encode(
+                "utf-8"
+            )
+        ).hexdigest()
         for chunk in chunks
     ]
 

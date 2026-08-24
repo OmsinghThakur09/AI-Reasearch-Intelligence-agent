@@ -114,8 +114,16 @@ header[data-testid="stHeader"] { background: transparent; }
 
 /* small persistent microcopy sitting just above the input */
 .footer-note {
-    text-align: center; color: var(--text-muted); font-size: 0.72rem;
-    font-family: 'IBM Plex Mono', monospace; margin: 0.6rem 0 0.1rem 0;
+    position: fixed;
+    bottom: 10px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-family: 'IBM Plex Mono', monospace;
+    z-index: 1000;
+    pointer-events: none; /* ensures it doesn't block any clicks */
 }
 
 /* chat bubbles */
@@ -165,7 +173,10 @@ header[data-testid="stHeader"] { background: transparent; }
     color: var(--text) !important;
     border-radius: 8px !important;
 }
-[data-testid="stChatInput"] { border-top: none; }
+/* add margin-bottom to lift the chat input above the fixed footer text */
+[data-testid="stChatInput"] {
+    border-top: none;
+}
 
 /* sidebar */
 section[data-testid="stSidebar"] { background: var(--surface); border-right: 1px solid var(--border); }

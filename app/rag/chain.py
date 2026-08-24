@@ -36,7 +36,7 @@ Accuracy rules:
 
 Conversation context:
 - If a previous question and answer are provided, use them as context only if the current question is clearly related to it."""
-    "Context: {context}"
+    "\n\nContext: {context}"
 )
 
 

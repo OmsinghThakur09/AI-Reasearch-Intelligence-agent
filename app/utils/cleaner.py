@@ -172,6 +172,9 @@ def _near_dup_key(text: str) -> str:
 def clean(raw_texts: list[str]) -> list[dict]:
     df = pd.DataFrame({"raw": raw_texts})
 
+    # tag each clean row with its original index
+    df["og_idx"] = range(len(raw_texts))
+
     # replace none with empty string
     df["raw"] = df["raw"].fillna("")
 
@@ -221,7 +224,7 @@ def clean(raw_texts: list[str]) -> list[dict]:
 
     df = df.drop(columns=["word_count", "near_dup_key"])
 
-    # return list of {'raw':..., 'clean':...}
+    # return list of {'og_idx':..., 'raw':..., 'clean':...}
     return df.to_dict("records")
 
 

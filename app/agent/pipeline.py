@@ -70,9 +70,10 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
                         item["content"] = raw
 
         raw_clean_dict = clean([row["content"] for row in raw_docs])
+        aligned_docs = [raw_docs[row["og_idx"]] for row in raw_clean_dict]
 
         # step 6: save documents in db
-        save_documents(query_id, raw_docs, raw_clean_dict)
+        save_documents(query_id, aligned_docs, raw_clean_dict)
 
         # step 7: Ingest clean text into ChromaDB
         ingest_clean_text(
@@ -83,7 +84,7 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
                     "query_id": str(query_id),
                     "session_id": str(s_id),
                 }
-                for row in raw_docs
+                for row in aligned_docs
             ],
         )
 

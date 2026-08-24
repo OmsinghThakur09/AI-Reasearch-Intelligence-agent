@@ -50,7 +50,7 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
         sources, raw_docs = parse_agent_output(agent_output)
 
         # step 4: log every agent tool call to db
-        save_agent_actions(agent_output.get("messages", ""), query_id)
+        save_agent_actions(agent_output.get("search_results", []), query_id)
 
         if previous_qa is not None:
             augmented_query = (
@@ -66,8 +66,8 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
             # if escalated node returned full raw web page
             for url, raw in raw_content:
                 for item in raw_docs:
-                    if url in item.keys():
-                        item["url"] = raw
+                    if item["url"] == url:
+                        item["content"] = raw
 
         raw_clean_dict = clean([row["content"] for row in raw_docs])
 

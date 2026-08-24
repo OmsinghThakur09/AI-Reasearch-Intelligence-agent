@@ -9,6 +9,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 import hashlib
+import torch
 
 CHROMA_DIR = "./chroma_db"
 EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
@@ -23,10 +24,14 @@ def get_vectorstore() -> Chroma:
     """Function to load existing ChromaDB vectorestore or load new if first run"""
     global _embeddings, _vectorstore
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     if _vectorstore is None:
         _embeddings = HuggingFaceEmbeddings(
             model_name=EMBEDDING_MODEL,
-            model_kwargs={"device": "cuda"},  # use GTX 1650 instead of CPU
+            model_kwargs={
+                "device": device
+            },  # use GTX 1650 and cpu as per the availablility
         )
         _vectorstore = Chroma(
             embedding_function=_embeddings,

@@ -19,7 +19,7 @@ def parse_agent_output(agent_output: dict):
 
     search_results = agent_output.get("search_results", [])
     if not search_results:
-        return []
+        return [], []
     for query_block in search_results:
         results = (
             query_block.get("results", []) if isinstance(query_block, dict) else []

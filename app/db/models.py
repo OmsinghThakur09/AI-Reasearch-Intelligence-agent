@@ -1,4 +1,4 @@
-# app/db/model.py
+# app/db/models.py
 
 # declaring database schemas using SQLAlchemy, every other component of agent(api, RAG pipeline, etc) will use this to manupulate data from db.
 from sqlalchemy import Integer, String, Text, DateTime, ForeignKey

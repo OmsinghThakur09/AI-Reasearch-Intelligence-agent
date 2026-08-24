@@ -49,7 +49,7 @@ class ResearchRequest(BaseModel):
 
 class ResearchResponse(BaseModel):
     answer: str
-    sources: list["str"]
+    sources: list[str]
     query_id: str
     session_id: str
 

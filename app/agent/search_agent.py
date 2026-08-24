@@ -1,4 +1,4 @@
-# app/agent/search_agent_V2.py
+# app/agent/search_agent.py
 
 """
 this script builds a langgraph agent that optimizes the user's query, searches
@@ -119,10 +119,11 @@ def build_agent():
         user_query = state["messages"][-1].content.strip()
 
         if not user_query:
-            raise EmptyQueryError("a query cant be empty! plese enter a query")
-        if len(user_query) < MIN_WORDS_COUNT:
+            raise EmptyQueryError("a query cant be empty! please enter a query")
+
+        if len(user_query.split()) < MIN_WORDS_COUNT:
             raise EmptyQueryError(
-                f"query is too short to be meaningful! minimun word count: {MIN_WORDS_COUNT}"
+                f"query is too short to be meaningful! minimum word count: {MIN_WORDS_COUNT}"
             )
 
         if not re.search(r"[A-Za-z]{2,}", user_query):
@@ -281,8 +282,8 @@ def run_agent(query: str, session_id: str):
 
 
 if __name__ == "__main__":
-    query = "explain Lethorium"
+    query = "explain recent discoveries about computer vision"
 
-    result, raw, sub_queries = run_agent(query, "9887tyfgh")
+    result, raw, sub_queries = run_agent(query, "5657890iohujgvbn")
     print(result)
     print(len(raw))

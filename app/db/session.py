@@ -1,4 +1,4 @@
-# app/db/connection.py
+# app/db/session.py
 
 # python script to create engine and establish session
 from sqlalchemy import create_engine

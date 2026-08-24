@@ -27,7 +27,7 @@ TOKEN_REVEAL_DELAY = 0.0009  # to delay streaming tokens
 # example questions shown as clickable chips on the empty landing state
 EXAMPLE_PROMPTS = [
     "Latest advances in quantum error correction",
-    "Recent dicoveries in astro-physics",
+    "Recent discoveries in astro-physics",
     "Summarize recent AI regulation news",
     "Explain CRISPR gene editing simply",
 ]

@@ -32,4 +32,4 @@ EXPOSE 8000
 ENV PATH="/app/.venv/bin:$PATH"
 
 # run Uvicorn directy from the virtural environment
-CMD ["Uvicorn", "app.api.routes:app", "--host", "0.0.0.0", "--port", "8000"], ["Streamlit", "run", "app/static/streamlit_app.py"]
+CMD ["Uvicorn", "app.api.routes:app", "--host", "0.0.0.0", "--port", "8000"]

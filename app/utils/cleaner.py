@@ -170,6 +170,9 @@ def _near_dup_key(text: str) -> str:
 
 
 def clean(raw_texts: list[str]) -> list[dict]:
+    if not raw_texts:
+        return []
+
     df = pd.DataFrame({"raw": raw_texts})
 
     # tag each clean row with its original index

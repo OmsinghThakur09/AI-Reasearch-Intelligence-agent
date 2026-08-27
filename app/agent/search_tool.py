@@ -12,23 +12,82 @@ from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
 from tavily import TavilyClient
 from config import TAVILY_API_KEY
 
+EXCLUDED_RESEARCH_DOMAINS = [
+    # Q&A and Unmoderated Forums
+    "quora.com",
+    "reddit.com",
+    "answers.yahoo.com",
+    "4chan.org",
+    "stackexchange.com",
+    "stackoverflow.com",
+    # Open Blogging and Content Farms
+    "medium.com",
+    "ehow.com",
+    "wikihow.com",
+    "hubpages.com",
+    "buzzfeed.com",
+    "vocal.media",
+    "substack.com",
+    # Social Media & Video
+    "pinterest.com",
+    "twitter.com",
+    "x.com",
+    "facebook.com",
+    "instagram.com",
+    "tiktok.com",
+    "linkedin.com",
+    "snapchat.com",
+    "youtube.com",
+    # Corporate PR and Syndicated Spin
+    "prnewswire.com",
+    "businesswire.com",
+    "prweb.com",
+    "globenewswire.com",
+    "accesswire.com",
+    # Programmatic Market Research Farms / Paywalled SEO Stubs
+    "indexbox.io",
+    "globemarketresearch.com",
+    "mordorintelligence.com",
+    "marketresearchfuture.com",
+    "alliedmarketresearch.com",
+    "grandviewresearch.com",
+    "marketsandmarkets.com",
+    "verifiedmarketresearch.com",
+    "expertmarketresearch.com",
+    "reportsanddata.com",
+    # Sensationalist Media / Tabloids
+    "dailymail.co.uk",
+    "thesun.co.uk",
+    "nypost.com",
+    "mirror.co.uk",
+]
+
 _tavily = TavilySearchAPIWrapper(tavily_api_key=TAVILY_API_KEY)  # type: ignore
 _tavily_client = TavilyClient(
     api_key=TAVILY_API_KEY
 )  # used only for full-page extraction
 
 
-def web_search_executor(query: str, max_result=2, include_raw_content: bool = False):
+def web_search_executor(
+    query: str, time_range: str, max_result=2, include_raw_content: bool = False
+):
     "runs one Tavily search and returns a list of result dicts (url/title/content/raw_content)"
     "include_raw_content defaults to False: normal search only needs the summarized"
     "'content' snippet, not the full page, which keeps every search fast."
 
-    raw_results = _tavily.raw_results(
-        query=query,
-        max_results=max_result,
-        exclude_domains=["youtube.com"],
-        include_raw_content="text" if include_raw_content else False,  # type: ignore
-    )
+    search_kwargs = {
+        "query": query,
+        "max_results": max_result,
+        "exclude_domains": EXCLUDED_RESEARCH_DOMAINS,
+        "include_raw_content": "text" if include_raw_content else False,
+    }
+    if time_range:
+        search_kwargs["time_range"] = time_range
+
+    try:
+        raw_results = _tavily_client.search(**search_kwargs)
+    except Exception:
+        return []
 
     results = raw_results.get("results", [])
     if not results:

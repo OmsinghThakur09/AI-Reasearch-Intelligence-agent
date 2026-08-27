@@ -65,9 +65,9 @@ BOILERPLATE_LINE_PATTERNS = [
     r"Search",
     r"LoginPricing",
     r"We value your privacy.*",
-    # academic reference / bibliography lines: real text, but pure
-    # citation strings have no usable prose for RAG context, so they're
-    # treated as boilerplate and dropped rather than counted as content.
+    r"Advertisement\b.*",
+    r"Previous Close.*",
+    r"Volume\s+[\d,]+.*",
     r".*\bdoi:\s*10\.\d{4,9}/\S*.*",
     r".*\[PMC free article\].*",
     r".*\[PubMed\].*",
@@ -101,6 +101,12 @@ def _is_boilerplate_line(line: str) -> bool:
     "return True if a single line is entirely a boilerplate/nav/footer line"
     stripped = line.strip()
     if not stripped:
+        return True
+
+    # Check for markdown table rows (starts with or contains multiple pipes)
+    if "|" in stripped and stripped.count("|") > 2:
+        return True
+    if stripped.startswith("---") or stripped.startswith("|"):
         return True
 
     # strip markdown heading markers ("#", "##", "###" ...) before matching,
@@ -175,9 +181,6 @@ def clean(raw_texts: list[str]) -> list[dict]:
 
     df = pd.DataFrame({"raw": raw_texts})
 
-    # tag each clean row with its original index
-    df["og_idx"] = range(len(raw_texts))
-
     # replace none with empty string
     df["raw"] = df["raw"].fillna("")
 
@@ -191,6 +194,10 @@ def clean(raw_texts: list[str]) -> list[dict]:
 
     # remove mid-paragraph artifacts (Tavily's own truncation marker, etc.)
     df["clean"] = df["clean"].apply(_strip_artifacts)
+
+    # Ensure broken sentences ending in a newline get a period before joining,
+    # and replace newlines with a space to prevent word-gluing.
+    df["clean"] = df["clean"].apply(lambda x: re.sub(r"([a-zA-Z0-9])\n", r"\1. ", x))
 
     # normalize newlines and whitespace (safe to collapse now)
     df["clean"] = df["clean"].apply(lambda x: re.sub(r"\s+", " ", x))
@@ -207,12 +214,6 @@ def clean(raw_texts: list[str]) -> list[dict]:
     # but too thin to be useful (e.g. a reference list that stripped down
     # to nothing), not just short snippets in general
     df["word_count"] = df["clean"].apply(_word_count)
-
-    # --- DIAGNOSTIC: inspect each doc's length + preview before dropping ---
-    # for i, row in df.iterrows():
-    #     preview = row["clean"][:120].replace("\n", " ")
-    #     print(f"[doc {i}] words={row['word_count']:<5} preview: {preview!r}")
-    # -------------------------------------------------------------------
 
     df = df[df["word_count"] > MIN_WORD_COUNT]
 
@@ -235,12 +236,11 @@ if __name__ == "__main__":
     from app.agent.search_agent import run_agent
     from app.agent.parser import parse_agent_output
 
-    query = "Detail the performance benchmarks of Retrieval-Aware Fine-Tuning (RAFT) techniques compared to standard RAG pipelines in recent domain-specific evaluations."
-    result, raw, _ = run_agent(query, "741ok8465mdfg")
-
-    print("raw content length:", len(raw))
-    raw_clean_dict = clean(raw)
-    print("cleaned length:", len(raw_clean_dict))
+    query = (
+        "Global semiconductor manufacturing capacity expansion Southeast Asia 2025 2026"
+    )
+    result, raw, _ = run_agent(query, "bhgyu7yuhtyu")
 
     _, metadata = parse_agent_output(result)
-    print("length of metadat:", len(metadata))
+    raw_clean_dict = clean([row["content"] for row in metadata])
+    print(raw_clean_dict)

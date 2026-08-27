@@ -44,7 +44,7 @@ PROMPT = ChatPromptTemplate.from_messages(
     [("system", system_prompt), ("human", "{input}")]
 )
 
-MODEL = "qwen/qwen3.6-27b"
+MODEL = "qwen/qwen3.8-27b"
 
 K_PER_SUBQUERY = 2  # chunks to retrieve per subquery
 
@@ -59,39 +59,42 @@ def retrieve_by_subqueries(
     """
     vectorstore = get_vectorstore()
 
-    search_filter: dict[str, Any]
-    if session_id is not None:
+    search_filter: dict[str, Any] = {}
+    if session_id:
         search_filter = {
             "$and": [
-                {"query_id": query_id},
-                {"session_id": session_id},
+                {"query_id": {"$eq": query_id}},
+                {"session_id": {"$eq": session_id}},
             ]
         }
     else:
-        search_filter = {
-            "$and": [
-                {"query_id": query_id},
-            ]
-        }
+        search_filter = {"query_id": {"$eq": query_id}}
 
     def search(query: str):
-        return vectorstore.similarity_search(
+        return vectorstore.similarity_search_with_score(
             query,
             k=5 if len(subqueries) == 1 else K_PER_SUBQUERY,
             filter=search_filter,
         )
 
-    all_docs = []
+    all_docs_with_scores = []
     with ThreadPoolExecutor(max_workers=len(subqueries)) as executor:
         futures = [executor.submit(search, q) for q in subqueries]
         for future in as_completed(futures):
-            all_docs.extend(future.result())
+            all_docs_with_scores.extend(future.result())
 
-    seen_id = set()
+    # Sort all retrieved chunks by score (lowest distance = most similar in Chroma)
+    # This guarantees the most relevant chunks are at the top, regardless of thread completion order
+    all_docs_with_scores.sort(key=lambda x: x[1])
+
+    seen_content = set()
     unique_docs = []
-    for doc in all_docs:
-        if doc.id not in seen_id:
-            seen_id.add(doc.id)
+
+    for doc, score in all_docs_with_scores:
+        # Hash the content to prevent massive strings in the set
+        content_hash = hash(doc.page_content.strip())
+        if content_hash not in seen_content:
+            seen_content.add(content_hash)
             unique_docs.append(doc)
 
     formatted_chunks = [

@@ -47,8 +47,8 @@ def ingest_clean_text(clean_text: list[str], metadata: list[dict]) -> None:
         return
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1200,
-        chunk_overlap=150,
+        chunk_size=500,
+        chunk_overlap=50,
         separators=["\n\n", "\n", ". ", " ", ""],
     )
 
@@ -66,10 +66,14 @@ def ingest_clean_text(clean_text: list[str], metadata: list[dict]) -> None:
         # Deduplicate identical paragraphs from different scraped URLs
         unique_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
 
-        if unique_hash not in seen_hashes:
-            seen_hashes.add(unique_hash)
+        if unique_hash in seen_hashes:
+            continue
 
-        db_id = f"{chunk.metadata.get('query_id', 'unknown')}_{unique_hash}"
+        seen_hashes.add(unique_hash)
+
+        session_id = chunk.metadata.get("session_id", "unknown")
+        query_id = chunk.metadata.get("query_id", "unknown")
+        db_id = f"{session_id}_{query_id}_{unique_hash}"
 
         unique_chunks.append(chunk)
         chunk_ids.append(db_id)

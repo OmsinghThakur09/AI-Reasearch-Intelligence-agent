@@ -133,6 +133,7 @@ header[data-testid="stHeader"] { background: transparent; }
     border-radius: 14px;
     padding: 0.9rem 1.1rem;
     margin-bottom: 0.85rem;
+    overflow-x: auto; /* Adds a scrollbar if an unbreakable string is too long */
 }
 [data-testid="stChatMessage"]:has([data-testid*="Assistant"]) { border-left: 3px solid var(--accent); }
 [data-testid="stChatMessage"]:has([data-testid*="User"]) { background: var(--surface-2); }
@@ -266,7 +267,7 @@ else:
 
 # replay existing chat history
 for msg in st.session_state.messages:
-    avatar = "🔎" if msg["role"] == "assistant" else "🧑"
+    avatar = "🔎" if msg["role"] == "assistant" else "👤"
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(_fix_bullets(msg["content"]))
         if msg.get("sources"):

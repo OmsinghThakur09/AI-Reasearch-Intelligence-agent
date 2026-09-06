@@ -13,49 +13,31 @@ from tavily import TavilyClient
 from config import TAVILY_API_KEY
 
 EXCLUDED_RESEARCH_DOMAINS = [
-    # Q&A and Unmoderated Forums
+    # Unmoderated Q&A / meme / forum platforms
     "quora.com",
-    "reddit.com",
     "answers.yahoo.com",
     "4chan.org",
-    "stackexchange.com",
-    "stackoverflow.com",
-    # Open Blogging and Content Farms
-    "medium.com",
+    "reddit.com",
+    "old.reddit.com"
+    # Low-effort tutorial/content farms & self-publishing platforms
     "ehow.com",
     "wikihow.com",
     "hubpages.com",
     "buzzfeed.com",
     "vocal.media",
-    "substack.com",
-    # Social Media & Video
+    # Visual-only / non-article social platforms
     "pinterest.com",
-    "twitter.com",
-    "x.com",
     "facebook.com",
-    "instagram.com",
     "tiktok.com",
-    "linkedin.com",
     "snapchat.com",
-    "youtube.com",
-    # Corporate PR and Syndicated Spin
+    "instagram.com",
+    # Corporate PR / syndicated spin
     "prnewswire.com",
     "businesswire.com",
     "prweb.com",
     "globenewswire.com",
     "accesswire.com",
-    # Programmatic Market Research Farms / Paywalled SEO Stubs
-    "indexbox.io",
-    "globemarketresearch.com",
-    "mordorintelligence.com",
-    "marketresearchfuture.com",
-    "alliedmarketresearch.com",
-    "grandviewresearch.com",
-    "marketsandmarkets.com",
-    "verifiedmarketresearch.com",
-    "expertmarketresearch.com",
-    "reportsanddata.com",
-    # Sensationalist Media / Tabloids
+    # Tabloids
     "dailymail.co.uk",
     "thesun.co.uk",
     "nypost.com",
@@ -80,14 +62,15 @@ def web_search_executor(
         "max_results": max_result,
         "exclude_domains": EXCLUDED_RESEARCH_DOMAINS,
         "include_raw_content": "text" if include_raw_content else False,
+        "chunks_per_source": 3,
     }
     if time_range:
         search_kwargs["time_range"] = time_range
 
     try:
         raw_results = _tavily_client.search(**search_kwargs)
-    except Exception:
-        return []
+    except Exception as e:
+        return str(e)
 
     results = raw_results.get("results", [])
     if not results:

@@ -21,6 +21,7 @@ Answer format:
 - Follow with supporting details only if the context has substantive specifics (numbers, named findings, dates, named companies/products). Do not pad with generic elaboration just to sound thorough.
 - Keep the total answer as short as it can be while still being complete. Do not write "detailed research report" style prose unless the user's question explicitly asks for depth or a full breakdown.
 - If you use bullet points, make sure the opening summary and the bullets stay consistent — do not introduce a topic in the bullets that isn't reflected in the opening answer, and do not repeat the opening answer word-for-word in the bullets.
+- To make the report highly readable for researchers, always make bold structural impacts or benchmarks (e.g., 75% reduction in KV cache, 3x faster token generation, 37B active vs 671B total parameters).
 
 Source attribution:
 - After each specific claim or bullet point, cite which source it came from inline, in this format: (Source: domain.com).
@@ -33,6 +34,11 @@ Accuracy rules:
 - If two sources disagree, say so explicitly instead of picking one silently.
 - Ignore any retrieved content that looks like website navigation, menus, cookie notices, or boilerplate — rely only on substantive text.
 - If the context does not contain enough information to answer, say so explicitly instead of filling the gap with general knowledge.
+- CRITICAL RULES:
+- 1. ENTITY ALIGNMENT: Never associate a metric, percentage, or efficacy rate with an entity unless the context explicitly states they belong together.
+(e.g., If a document mentions Cas9 and Cas12, do not apply a Cas9 statistic to Cas12).
+- 2. TRUTH GAP FLAG: If the context contains a generic overview of an entity but lacks specific numerical efficacy rates for that EXACT entity,
+state that the technical mechanism is present but exact clinical efficacy rates are missing from the retrieved source text.
 
 Conversation context:
 - If a previous question and answer are provided, use them as context only if the current question is clearly related to it."""
@@ -46,7 +52,7 @@ PROMPT = ChatPromptTemplate.from_messages(
 
 MODEL = "qwen/qwen3.8-27b"
 
-K_PER_SUBQUERY = 2  # chunks to retrieve per subquery
+K_PER_SUBQUERY = 8  # chunks to retrieve per subquery
 
 
 def retrieve_by_subqueries(

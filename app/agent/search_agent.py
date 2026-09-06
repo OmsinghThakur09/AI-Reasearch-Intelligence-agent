@@ -39,10 +39,10 @@ memory = SqliteSaver(conn)
 MAX_QUERIES = 3
 # sufficiency / escalation thresholds
 SUFFICIENT_CHARS = (
-    1200  # combined snippet length across all sources considered "enough"
+    10000  # combined snippet length across all sources considered "enough"
 )
-THIN_CHARS = 250  # a source's snippet shorter than this is considered "thin"
-MAX_ESCALATE = 2  # fetch full page for at most this many thin sources per run
+THIN_CHARS = 1000  # a source's snippet shorter than this is considered "thin"
+MAX_ESCALATE = 4  # fetch full page for at most this many thin sources per run
 
 MIN_WORDS_COUNT = 3  # user query must contain minimum word count
 
@@ -86,35 +86,47 @@ Today's date is: {current_date}
 
 Output JSON with exactly five keys, in this order: "sub_topics", "valid", "comparison_axis", "time_range", "queries".
 
-1. "sub_topics": distinct concepts or entities needing separate coverage (max 3). Merge overlapping facets into one sub-topic.
+if the current question references the previous one via pronouns or implicit comparison, resolve it into a standalone query using the previous question's entities before generating queries/sub_topics.
+
+Each query is used for BOTH a live web search (Tavily) AND a similarity search against a vector store of already-retrieved source text, so every query must work for both jobs at once.
+
+1. "sub_topics": distinct concepts, technical pillars, or entities needing separate coverage.
+   - For technical/scientific topics, break the question down into 2-3 core mechanical pillars (e.g., memory optimization, cutting mechanism).
+   - If comparing named entities, each sub-topic must cover exactly ONE entity — never merge two entities into one sub-topic.
 
 2. "valid": true if every sub-topic genuinely exists, else false (then comparison_axis and time_range are null, queries is []).
 
-3. "comparison_axis": if comparing 2+ named entities, extract the exact metric or attribute (e.g. "annual GDP growth rate", "inference latency benchmark").
-Otherwise null.
+3. "comparison_axis": if comparing 2+ named entities, extract the exact metric or attribute by name (e.g. "annual GDP growth rate", "inference latency benchmark"). Otherwise null.
 
-4. "time_range": if the question strictly requires recent data, choose one of "day", "week", "month", "year" (matches Tavily's time_range parameter).
-Otherwise null. Never append relative dates into queries.
+4. "time_range": choose one of "day", "week", "month", "year" ONLY if the question asks about the current/ongoing state of something (signaled by words like "latest", "current", "now", "this month", or a topic that is inherently fast-moving,
+e.g. chip export rules, model releases, live prices) — the range reflects how recently Tavily crawled the page, not any date mentioned in the query. Otherwise, including whenever the question references a specific fixed date, year, or past event
+(e.g. "the 2024 survey", "the March 2025 announcement"), set it to null — the source could have been published or crawled at any time and must not be filtered out by recency
 
-5. "queries": exactly 1 high-density search query per sub-topic (1-3 total).
-   - Format queries using dense technical keywords, entity names, metrics, and official nomenclature.
-   - Do NOT append conversational filler or intent tags like "explained", "overview", "reported", "guide", "summary", or "findings".
-   - If comparison_axis is set, append the exact comparison axis to each entity query.
+5. "queries": exactly 1 or 2 distinct query per sub-topic, written as a dense keyword phrase — NOT a question, NOT a full sentence.
+   - For multi-entity comparisons: If comparison_axis is set, append it to each entity's own query — never name two entities in the same query.
+   - For single technical topics: Generate a highly targeted keyword query for each isolated sub-topic/pillar.
+   - Use 4-7 dense keywords: entity names, technical terms, and official nomenclature, in the vocabulary a source article on the topic would actually use.
+   - Do NOT use question words ("what", "how", "why", "compare", "vs") or conversational filler/intent tags ("explained", "overview", "reported", "guide", "summary", "findings").
 
 Respond with ONLY the JSON object.
 
-Example 1 (broad technical topic):
-Q: "explain how photosynthesis works in plants"
-{{"sub_topics": ["photosynthesis mechanism"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["photosynthesis light dependent reactions biochemical pathways"]}}
+Example 1 (deep technical topic breakdown):
+Q: "Summarize the key architectural changes introduced in the newest open-source LLM models released this year."
+{{"sub_topics": ["attention and memory efficiency", "mixture of experts routing", "inference prediction training"], "valid": true, "comparison_axis": null, "time_range":
+"year", "queries": ["open source LLM multi head latent attention KV cache", "sparse mixture of experts MoE routing parameters architecture", "native multi token prediction training inference loops"]}}
 
 Example 2 (multi-entity comparison):
 Q: "compare the economics of japan, russia and saudi arabia"
-{{"sub_topics": ["Japan", "Russia", "Saudi Arabia"], "valid": true, "comparison_axis": "annual GDP growth rate 2025 2026", "time_range": null,
-"queries": ["Japan annual GDP growth rate 2025 2026", "Russia annual GDP growth rate 2025 2026", "Saudi Arabia annual GDP growth rate 2025 2026"]}}
+{{"sub_topics": ["Japan", "Russia", "Saudi Arabia"], "valid": true, "comparison_axis": "annual GDP growth rate", "time_range": "year", "queries": ["Japan annual GDP growth rate", "Russia annual GDP growth rate", "Saudi Arabia annual GDP growth rate"]}}
 
-Example 3 (invalid topic):
-Q: "explain how the Zorblatt Compression Algorithm reduces latency in neural networks"
-{{"sub_topics": ["Zorblatt Compression Algorithm"], "valid": false, "comparison_axis": null, "time_range": null, "queries": []}}
+Example 3 (quantitative benchmark comparison):
+Q: "Detail the performance benchmarks of Retrieval-Aware Fine-Tuning (RAFT) techniques compared to standard RAG pipelines in recent domain-specific evaluations."
+{{"sub_topics": ["RAFT domain-specific benchmark results", "standard RAG pipeline benchmark results"], "valid": true, "comparison_axis": "domain-specific evaluation performance metrics", "time_range": "year",
+"queries": ["retrieval aware fine tuning RAFT accuracy F1 score benchmark paper", "standard RAG pipeline accuracy F1 score benchmark evaluation paper"]}}
+
+Example 4 (fixed past date/event — no time_range):
+Q: "What were the specific findings of the 2024 field survey on soil microbiome diversity in the Sundarbans mangrove forest?"
+{{"sub_topics": ["Sundarbans mangrove soil microbiome diversity 2024 survey findings"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["Sundarbans mangrove soil microbiome diversity field survey 2024"]}}
 """
 
 
@@ -142,13 +154,13 @@ def build_agent():
         if not user_query:
             raise EmptyQueryError("a query cant be empty! please enter a query")
 
+        if not re.search(r"[A-Za-z]{2,}", user_query):
+            raise EmptyQueryError("Query does not contain any recognizable words.")
+
         if len(user_query.split()) < MIN_WORDS_COUNT:
             raise EmptyQueryError(
                 f"query is too short to be meaningful! minimum word count: {MIN_WORDS_COUNT}"
             )
-
-        if not re.search(r"[A-Za-z]{2,}", user_query):
-            raise EmptyQueryError("Query does not contain any recognizable words.")
 
         # drop every message except the current one, so the checkpointed
         # state (and any future prompt built from it) doesn't accumulate
@@ -235,7 +247,7 @@ def build_agent():
                     web_search_executor,
                     q,
                     time_range=time_range,
-                    max_result=5 if len(queries) == 1 else 2,
+                    max_result=5 if len(queries) == 1 else 3,
                 ): q
                 for q in queries
             }
@@ -319,11 +331,16 @@ def build_agent():
 GLOBAL_AGENT = build_agent()
 
 
-def run_agent(query: str, session_id: str):
+def run_agent(query: str, pre_query: str | None, session_id: str):
     config = {"configurable": {"thread_id": session_id}}
 
+    if pre_query:
+        content = f"Previous question: {pre_query}\n\nCurrent question: {query}"
+    else:
+        content = query
+
     result = GLOBAL_AGENT.invoke(
-        {"messages": [{"role": "user", "content": query}]},
+        {"messages": [{"role": "user", "content": content}]},
         config=config,
     )
 
@@ -333,9 +350,9 @@ def run_agent(query: str, session_id: str):
     return result, raw_content, sub_queries
 
 
-if __name__ == "__main__":
-    query = "State of the art long-context window mechanisms in large language models"
+# if __name__ == "__main__":
+#     query = "State of the art long-context window mechanisms in large language models"
 
-    result, raw, sub_queries = run_agent(query, "5657890iohujgvbn")
-    print(result)
-    print(len(raw))
+#     result, raw, sub_queries = run_agent(query, "5657890iohujgvbn")
+#     print(result)
+#     print(len(raw))

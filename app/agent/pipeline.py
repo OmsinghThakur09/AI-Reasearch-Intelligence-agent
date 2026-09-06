@@ -11,7 +11,7 @@ from app.db.queries import (
 from app.agent.search_agent import run_agent
 from app.agent.parser import parse_agent_output
 from app.utils.cleaner import clean
-from app.rag.ingestor import ingest_clean_text
+from app.rag.ingestor import ingest_clean_text, cleanup_chroma_memory
 from app.rag.chain import retrieve_by_subqueries, build_llm_call
 import uuid
 
@@ -119,6 +119,9 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
         # step 11: save this turn's Q&A as the new "last answer" for this
         # session, overwriting the previous one (we only keep one turn back)
         SESSION_LAST_QA[s_id] = {"question": query, "answer": answer}
+
+        # step 12: delete ingested data for current query
+        cleanup_chroma_memory(str(query_id))
 
         yield {
             "event": "done",

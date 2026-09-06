@@ -43,8 +43,12 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
     yield {"event": "session", "data": {"session_id": s_id, "query_id": str(query_id)}}
 
     try:
+        previous_query = (
+            previous_qa.get("question") if previous_qa is not None else None
+        )
+
         # step 2: run search agent
-        agent_output, raw_content, sub_queries = run_agent(query, s_id)
+        agent_output, raw_content, sub_queries = run_agent(query, previous_query, s_id)
 
         # step 3: parse langgraph's agent output
         sources, raw_docs = parse_agent_output(agent_output)
@@ -70,10 +74,9 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
                         item["content"] = raw
 
         raw_clean_dict = clean([row["content"] for row in raw_docs])
-        aligned_docs = [raw_docs[row["og_idx"]] for row in raw_clean_dict]
 
         # step 6: save documents in db
-        save_documents(query_id, aligned_docs, raw_clean_dict)
+        save_documents(query_id, raw_docs, raw_clean_dict)
 
         # step 7: Ingest clean text into ChromaDB
         ingest_clean_text(
@@ -84,7 +87,7 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
                     "query_id": str(query_id),
                     "session_id": str(s_id),
                 }
-                for row in aligned_docs
+                for row in raw_docs
             ],
         )
 
@@ -131,7 +134,6 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
         update_query_status(query_id, "failed")
         update_error_message(query_id, str(e))
         yield {"event": "error", "data": str(e)}
-        raise
 
 
 # normal function
@@ -147,9 +149,9 @@ def run_research_pipeline(query: str, session_id: str | None = None):
     return final
 
 
-if __name__ == "__main__":
-    query = "Quantum computing advancements 2026"
+# if __name__ == "__main__":
+#     query = "Detail the performance benchmarks of Retrieval-Aware Fine-Tuning (RAFT) techniques compared to standard RAG pipelines in recent domain-specific evaluations."
 
-    result = run_research_pipeline(query)
-    print(result["answer"])
-    print(result["session_id"])
+#     result = run_research_pipeline(query)
+#     print(result["answer"])
+#     print(result["session_id"])

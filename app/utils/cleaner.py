@@ -232,15 +232,16 @@ def clean(raw_texts: list[str]) -> list[dict]:
     return df.to_dict("records")
 
 
-if __name__ == "__main__":
-    from app.agent.search_agent import run_agent
-    from app.agent.parser import parse_agent_output
+# if __name__ == "__main__":
+#     from app.agent.search_agent import run_agent
+#     from app.agent.parser import parse_agent_output
 
-    query = (
-        "Global semiconductor manufacturing capacity expansion Southeast Asia 2025 2026"
-    )
-    result, raw, _ = run_agent(query, "bhgyu7yuhtyu")
+#     query = (
+#         r"Inform me about the latest high-temperature superconductor breakthroughs and the specific transition temperatures ((T_{c})) achieved in recent 2025 or 2026 preprints"
+#     )
+#     result, raw, _ = run_agent(query, "9865oikl7834dyho")
 
-    _, metadata = parse_agent_output(result)
-    raw_clean_dict = clean([row["content"] for row in metadata])
-    print(raw_clean_dict)
+#     _, metadata = parse_agent_output(result)
+#     raw_clean_dict = clean([row["content"] for row in metadata])
+#     print(len(raw_clean_dict))
+#     print(len(metadata))

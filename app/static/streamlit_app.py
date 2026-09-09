@@ -20,7 +20,9 @@ from urllib.parse import urlparse
 import requests
 import streamlit as st
 
-API_URL = "http://localhost:8000"
+import os
+
+API_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 TOKEN_REVEAL_DELAY = 0.0009  # to delay streaming tokens
 

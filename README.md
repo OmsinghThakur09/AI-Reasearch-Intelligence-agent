@@ -250,6 +250,7 @@ MIT License
 ## Author
 
 **Omsingh Bais**
+
 Built as a hands-on portfolio project to demonstrate production-grade AI/LLM engineering, multi-agent orchestration, RAG pipeline design, and cloud deployment.
 
 *[GitHub](https://github.com/OmsinghThakur09) | [LinkedIn](https://www.linkedin.com/in/omsingh-bais-77312b22a/)*

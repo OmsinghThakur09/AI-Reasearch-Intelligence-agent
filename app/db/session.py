@@ -9,7 +9,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-engine = create_engine(os.environ["DATABASE_URL"])
+engine = create_engine(
+    os.environ["DATABASE_URL"],
+    pool_pre_ping=True,  # test each connection with a cheap ping before handing it out
+    pool_recycle=280,  # proactively retire connections before Neon's 5-min suspend window
+)
 Sessionlocal = sessionmaker(bind=engine)
 
 

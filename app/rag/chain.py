@@ -67,12 +67,7 @@ def retrieve_by_subqueries(
 
     search_filter: dict[str, Any] = {}
     if session_id:
-        search_filter = {
-            "$and": [
-                {"query_id": {"$eq": query_id}},
-                {"session_id": {"$eq": session_id}},
-            ]
-        }
+        search_filter = {"session_id": {"$eq": session_id}}
     else:
         search_filter = {"query_id": {"$eq": query_id}}
 

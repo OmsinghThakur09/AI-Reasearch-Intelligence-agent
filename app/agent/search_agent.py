@@ -7,15 +7,24 @@ the optimized sub-queries over the web concurrently, then runs a deterministic
 enough or whether the top thin sources need their full page fetched.
 
 Flow:
-    START -> structural_check_node -> optimize_node -> validity_node -> search_node -> check_and_escalate_node -> END
+    START -> structural_check_node -> manage_history_node -> optimize_node
+    -> validity_node -> search_node -> check_and_escalate_node -> END
 
 structural_check_node rejects empty/too-short/gibberish input before
 any LLM call is made, and validity_node halts the run right after
 optimize_node if the LLM judged the query's topic to not exist at all.
+
+conversation memory lives only in langgraph checkpointer, only last WINDOW_TURNS will be saved
+as it is and afterwards previous context will be summarized to keep memory clean and short(rolling context window) .
 """
 
 from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage
+from langchain_core.messages import (
+    SystemMessage,
+    HumanMessage,
+    AIMessage,
+    RemoveMessage,
+)
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
@@ -31,7 +40,7 @@ from datetime import datetime
 from config import GROQ_API_KEY
 from app.agent.search_tool import web_search_executor, fetch_full_pages
 
-MODEL = "qwen/qwen3.8-27b"
+MODEL = "openai/gpt-oss-20b"
 
 conn = sqlite3.connect("checkpoints.sqlite", check_same_thread=False)
 memory = SqliteSaver(conn)
@@ -45,6 +54,8 @@ THIN_CHARS = 1000  # a source's snippet shorter than this is considered "thin"
 MAX_ESCALATE = 4  # fetch full page for at most this many thin sources per run
 
 MIN_WORDS_COUNT = 3  # user query must contain minimum word count
+
+WINDOW_TURNS = 4  # how many of the most recent user turns stay as raw messages
 
 # retry settings for the planner LLM's JSON-mode call, which can
 # occasionally return invalid/empty JSON (a known flake with hosted
@@ -60,6 +71,7 @@ class AgentState(TypedDict):
     topic_valid: bool
     time_range: str
     raw_content: list
+    conversation_summary: str  # rolling summary of turns pushed out of the window
 
 
 class EmptyQueryError(Exception):
@@ -130,9 +142,30 @@ Q: "What were the specific findings of the 2024 field survey on soil microbiome 
 """
 
 
+def _summarize_old_turns(existing_summary: str, old_turns_text: str) -> str:
+    "to keep memory short summarizing old turn context older than WINDOW_TURNS recent turns"
+
+    try:
+        summarizer_llm = ChatGroq(api_key=GROQ_API_KEY, model=MODEL, temperature=0)
+        prompt = (
+            "Condense the following older research-conversation turns into a short "
+            "running memory (3-5 sentences max). Preserve named entities, topics, "
+            "and any ongoing comparison. Merge with the existing summary rather "
+            "than discarding anything still relevant.\n\n"
+            f"Existing summary: {existing_summary or '(none yet)'}\n\n"
+            f"Older turns to fold in:\n{old_turns_text}"
+        )
+        response = summarizer_llm.invoke([HumanMessage(content=prompt)])
+        summary = (response.content or "").strip()
+        return summary or existing_summary
+    except Exception:
+        return existing_summary
+
+
 def build_agent():
     """build the graph:
-    START -> structural_check_node -> optimize_node -> validity_node -> search_node -> check_and_escalate_node -> END
+    START -> structural_check_node -> manage_history_node -> optimize_node
+    -> validity_node -> search_node -> check_and_escalate_node -> END
     """
 
     # planner llm: plain llm call to optimize user query.
@@ -141,11 +174,9 @@ def build_agent():
     )
 
     def structural_check_node(state: AgentState):
-        "a node that will check for any empty, gibberish, or less than minimum word count query, if found then raises Exception"
-        "also trims message history: since add_messages only appends, a long-lived"
-        "session (same thread_id reused across many turns) would otherwise grow"
-        "'messages' forever in the sqlite checkpoint. we only ever need the latest"
-        "human query here, so every older message is explicitly removed."
+        "checks for any empty, gibberish, or less-than-minimum-word-count query,"
+        "and raises an exception if found. does NOT touch message history — that"
+        "is manage_history_node's job now, so this node stays a pure validator."
 
         all_messages = state["messages"]
         current_message = all_messages[-1]
@@ -162,18 +193,71 @@ def build_agent():
                 f"query is too short to be meaningful! minimum word count: {MIN_WORDS_COUNT}"
             )
 
-        # drop every message except the current one, so the checkpointed
-        # state (and any future prompt built from it) doesn't accumulate
-        # unbounded history across turns of the same session
-        old_messages = [
-            RemoveMessage(id=m.id) for m in all_messages if m.id != current_message.id
+        return {}
+
+    def manage_history_node(state: AgentState):
+        "keeps only the last WINDOW_TURNS user turns as raw messages in the"
+        "checkpointer. anything older is folded into conversation_summary"
+        "instead of being kept verbatim, so a long-lived session (same"
+        "thread_id reused across many turns) doesn't grow 'messages' forever"
+
+        all_messages = state["messages"]
+        human_indices = [
+            i for i, m in enumerate(all_messages) if isinstance(m, HumanMessage)
         ]
 
-        return {"messages": old_messages} if old_messages else {}
+        if len(human_indices) <= WINDOW_TURNS:
+            return {}
+
+        cutoff_idx = human_indices[-WINDOW_TURNS]
+        old_messages = all_messages[:cutoff_idx]
+
+        if not old_messages:
+            return {}
+
+        old_turns_text = "\n".join(
+            f"{'User' if isinstance(m, HumanMessage) else 'Assistant'}: {m.content}"
+            for m in old_messages
+            if isinstance(m, (HumanMessage, AIMessage))
+        )
+
+        new_summary = _summarize_old_turns(
+            state.get("conversation_summary", ""), old_turns_text
+        )
+
+        return {
+            "messages": [RemoveMessage(id=m.id) for m in old_messages],
+            "conversation_summary": new_summary,
+        }
 
     def optimize_query_node(state: AgentState):
-        "user query optimization before web search"
-        user_query = state["messages"][-1].content
+        "user query optimization before web search. builds the planner's input"
+        "from checkpointer state only — the running conversation_summary plus"
+        "whatever raw turns are still in the window — so this is the single"
+        "place that resolves follow-up phrasing. no external dict involved."
+
+        all_messages = state["messages"]
+        current_query = all_messages[-1].content
+        summary = state.get("conversation_summary", "")
+
+        context_lines = []
+        for m in all_messages[:-1]:
+            if isinstance(m, HumanMessage):
+                context_lines.append(f"Previous user question: {m.content}")
+            elif isinstance(m, AIMessage):
+                context_lines.append(f"Previous answer: {m.content}")
+
+        context_block = ""
+        if summary:
+            context_block += f"Conversation summary so far: {summary}\n"
+        if context_lines:
+            context_block += "\n".join(context_lines) + "\n"
+
+        planner_input = (
+            f"{context_block}Current question: {current_query}"
+            if context_block
+            else current_query
+        )
 
         last_error: Exception | None = None
         parsed = None
@@ -183,7 +267,7 @@ def build_agent():
                 response = planner_llm.invoke(
                     [
                         SystemMessage(content=OPTIMIZE_SYSTEM_PROMPT),
-                        HumanMessage(content=user_query),
+                        HumanMessage(content=planner_input),
                     ]
                 )
 
@@ -214,7 +298,7 @@ def build_agent():
         time_range = parsed.get("time_range", None)
 
         if is_valid and not queries:
-            queries = [user_query]
+            queries = [current_query]
 
         return {
             "optimized_queries": queries,
@@ -312,13 +396,15 @@ def build_agent():
 
     graph = StateGraph(AgentState)
     graph.add_node("structural_check_node", structural_check_node)
+    graph.add_node("manage_history_node", manage_history_node)
     graph.add_node("optimize_node", optimize_query_node)
     graph.add_node("validity_node", validity_check_node)
     graph.add_node("search_node", search_node)
     graph.add_node("check_and_escalate_node", check_and_escalate_node)
 
     graph.add_edge(START, "structural_check_node")
-    graph.add_edge("structural_check_node", "optimize_node")
+    graph.add_edge("structural_check_node", "manage_history_node")
+    graph.add_edge("manage_history_node", "optimize_node")
     graph.add_edge("optimize_node", "validity_node")
     graph.add_edge("validity_node", "search_node")
     graph.add_edge("search_node", "check_and_escalate_node")
@@ -331,16 +417,12 @@ def build_agent():
 GLOBAL_AGENT = build_agent()
 
 
-def run_agent(query: str, pre_query: str | None, session_id: str):
+def run_agent(query: str, session_id: str):
+
     config = {"configurable": {"thread_id": session_id}}
 
-    if pre_query:
-        content = f"Previous question: {pre_query}\n\nCurrent question: {query}"
-    else:
-        content = query
-
     result = GLOBAL_AGENT.invoke(
-        {"messages": [{"role": "user", "content": content}]},
+        {"messages": [HumanMessage(content=query)]},
         config=config,
     )
 
@@ -348,6 +430,39 @@ def run_agent(query: str, pre_query: str | None, session_id: str):
     sub_queries = result.get("optimized_queries", [])
 
     return result, raw_content, sub_queries
+
+
+def get_conversation_context(session_id: str) -> str:
+    "reads this session's checkpointed state and returns a short text block"
+    "(running summary + recent turns)"
+
+    config = {"configurable": {"thread_id": session_id}}
+    snapshot = GLOBAL_AGENT.get_state(config)
+
+    if not snapshot or not snapshot.values:
+        return ""
+
+    messages = snapshot.values.get("messages", [])
+    summary = snapshot.values.get("conversation_summary", "")
+
+    lines = []
+    if summary:
+        lines.append(f"Conversation summary so far: {summary}")
+    for m in messages:
+        if isinstance(m, HumanMessage):
+            lines.append(f"Previous question: {m.content}")
+        elif isinstance(m, AIMessage):
+            lines.append(f"Previous answer: {m.content}")
+
+    return "\n".join(lines)
+
+
+def save_answer_to_memory(session_id: str, answer: str) -> None:
+    "appends the final generated answer onto this session's checkpointed"
+    "thread as an AIMessage."
+
+    config = {"configurable": {"thread_id": session_id}}
+    GLOBAL_AGENT.update_state(config, {"messages": [AIMessage(content=answer)]})
 
 
 # if __name__ == "__main__":

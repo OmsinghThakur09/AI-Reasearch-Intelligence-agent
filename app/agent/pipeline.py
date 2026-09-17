@@ -8,15 +8,16 @@ from app.db.queries import (
     save_agent_actions,
     update_error_message,
 )
-from app.agent.search_agent import run_agent
+from app.agent.search_agent import (
+    run_agent,
+    get_conversation_context,
+    save_answer_to_memory,
+)
 from app.agent.parser import parse_agent_output
 from app.utils.cleaner import clean
-from app.rag.ingestor import ingest_clean_text, cleanup_chroma_memory
+from app.rag.ingestor import ingest_clean_text
 from app.rag.chain import retrieve_by_subqueries, build_llm_call
 import uuid
-
-# simple in-memory store for last question/answer per session_id.
-SESSION_LAST_QA: dict[str, dict[str, str]] = {}
 
 
 # generator function
@@ -36,19 +37,17 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
     # step 1: save user query in db and gets UUID
     query_id = save_user_query(query)
 
-    # step 1b: look up previous turn's Q&A for this session, if any
-    previous_qa = SESSION_LAST_QA.get(session_id) if session_id else None
+    # step 1b: every session is one checkpointed thread in search_agent's
+    # graph — resolve the thread id first, then read whatever context that
+    # thread already holds (empty string for a brand new session).
     s_id = session_id or str(uuid.uuid4())
+    conversation_context = get_conversation_context(s_id)
 
     yield {"event": "session", "data": {"session_id": s_id, "query_id": str(query_id)}}
 
     try:
-        previous_query = (
-            previous_qa.get("question") if previous_qa is not None else None
-        )
-
         # step 2: run search agent
-        agent_output, raw_content, sub_queries = run_agent(query, previous_query, s_id)
+        agent_output, raw_content, sub_queries = run_agent(query, s_id)
 
         # step 3: parse langgraph's agent output
         sources, raw_docs = parse_agent_output(agent_output)
@@ -56,14 +55,11 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
         # step 4: log every agent tool call to db
         save_agent_actions(agent_output.get("search_results", []), query_id)
 
-        if previous_qa is not None:
-            augmented_query = (
-                f"Previous question: {previous_qa['question']}\n"
-                f"Previous answer: {previous_qa['answer']}\n\n"
-                f"Current question: {query}"
-            )
-        else:
-            augmented_query = query
+        augmented_query = (
+            f"{conversation_context}\n\nCurrent question: {query}"
+            if conversation_context
+            else query
+        )
 
         # step 5: clean raw web page result into clean text
         if len(raw_content) > 0:
@@ -116,12 +112,8 @@ def stream_research_pipeline(query: str, session_id: str | None = None):
         # step 10: update status of user query
         update_query_status(query_id, "completed")
 
-        # step 11: save this turn's Q&A as the new "last answer" for this
-        # session, overwriting the previous one (we only keep one turn back)
-        SESSION_LAST_QA[s_id] = {"question": query, "answer": answer}
-
-        # step 12: delete ingested data for current query
-        cleanup_chroma_memory(str(query_id))
+        # step 11: write this turn's answer into the same checkpointed thread search_agent.py owns
+        save_answer_to_memory(s_id, answer)
 
         yield {
             "event": "done",

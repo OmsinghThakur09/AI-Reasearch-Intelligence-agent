@@ -73,7 +73,9 @@ User Query
    ↓
 Structural Validation        (reject empty / too short / gibberish input)
    ↓
-Query Optimization           (LLM planner → sub-topics + dense keyword queries)
+Conversation Memory Management (rolling window of recent turns + auto-summary, via LangGraph checkpoint)
+   ↓
+Query Optimization           (LLM planner → sub-topics + dense keyword queries, resolved against conversation history)
    ↓
 Topic Validity Check         (bail out early if the topic doesn't exist)
    ↓
@@ -91,7 +93,7 @@ Streaming Answer Generation  (Groq LLM, grounded + cited)
    ↓
 Cited Answer + Cleanup
 ```
-*The first five stages run inside a **LangGraph** state machine; the rest is orchestrated by the pipeline layer around it.*
+*The first six stages run inside a **LangGraph** state machine; the rest is orchestrated by the pipeline layer around it.*
 
 ## Key Features
 
@@ -101,6 +103,7 @@ Cited Answer + Cleanup
 - 🧹 **Robust content cleaning** — Strips navigation/boilerplate text, repeated spam lines, citation clutter, and near-duplicate documents before reaching the model.
 - 🛡️ **Contamination-free retrieval** — Every chunk is tagged with `query_id` and `session_id`, ensuring context never leaks between questions.
 - 💬 **Streaming, cited answers** — Tokens stream to the UI over SSE. Every claim is attributed inline, hedged language is preserved, and disagreements between sources are surfaced.
+- 🧵 **Multi-turn conversational memory** — Follow-up questions (pronouns, "what about...", multi-hop comparisons) are resolved using a LangGraph-checkpointed rolling window of the last few turns plus an auto-summarized history of everything older, so context isn't lost as a conversation grows.
 - 🗄️ **Full audit trail** — Every query, document, source, and search action is logged to Postgres.
 - 🗑️ **Ephemeral vector store** — ChromaDB acts as scratch space and is wiped per query right after the answer is generated.
 - 🚀 **One-click public demo** — Dockerized and deployed on AWS for seamless recruiter access.
@@ -153,16 +156,17 @@ tests/
 
 ## How It Works
 
-1. **Structural Check** — Rejects empty, too-short, or non-alphabetic input before any LLM call to save tokens. It also trims old conversation turns from the LangGraph checkpoint.
-2. **Query Optimization** — An LLM planner splits the question into 2–3 sub-topics and writes dense keyword queries optimized for both live web and similarity search.
-3. **Validity Check** — Stops immediately if the planner judges the topic doesn't genuinely exist.
-4. **Web Search** — Sub-queries run concurrently against Tavily. Results are deduplicated by URL and low-quality domains are filtered out.
-5. **Sufficiency Check & Escalation** — If snippet content isn't enough, only the thinnest individual sources get a full-page fetch, keeping costs scaled to what's actually missing.
-6. **Cleaning** — Raw text is stripped of boilerplate, spam, and near-duplicates to keep only substantive content.
-7. **Ingestion** — Cleaned text is chunked and embedded into ChromaDB, tagged with `query_id` and `session_id`.
-8. **Retrieval** — Each sub-query independently retrieves its most relevant chunks, which are then merged and deduplicated.
-9. **Answer Generation** — A Groq-hosted LLM streams the answer token-by-token, grounded strictly in context, with inline `(Source: domain.com)` citations.
-10. **Cleanup** — The query's vectors are deleted from ChromaDB. Postgres keeps the permanent record.
+1. **Structural Check** — Rejects empty, too-short, or non-alphabetic input before any LLM call to save tokens.
+2. **Conversation Memory Management** — Keeps the last 4 raw turns of a session in the LangGraph checkpoint as-is, and folds anything older into a running summary, so long conversations stay bounded without losing earlier context.
+3. **Query Optimization** — An LLM planner reads that summary plus the recent turns (not just the latest message), resolves pronouns and follow-up references into a standalone question, then splits it into 2–3 sub-topics and writes dense keyword queries optimized for both live web and similarity search.
+4. **Validity Check** — Stops immediately if the planner judges the topic doesn't genuinely exist.
+5. **Web Search** — Sub-queries run concurrently against Tavily. Results are deduplicated by URL and low-quality domains are filtered out.
+6. **Sufficiency Check & Escalation** — If snippet content isn't enough, only the thinnest individual sources get a full-page fetch, keeping costs scaled to what's actually missing.
+7. **Cleaning** — Raw text is stripped of boilerplate, spam, and near-duplicates to keep only substantive content.
+8. **Ingestion** — Cleaned text is chunked and embedded into ChromaDB, tagged with `query_id` and `session_id`.
+9. **Retrieval** — Each sub-query independently retrieves its most relevant chunks, which are then merged and deduplicated.
+10. **Answer Generation** — A Groq-hosted LLM streams the answer token-by-token, grounded strictly in context, with inline `(Source: domain.com)` citations. The finished answer is then written back into the same checkpointed thread, so it's available as context for the next turn.
+11. **Cleanup** — The query's vectors are deleted from ChromaDB. Postgres keeps the permanent record.
 
 ## Data & Persistence
 
@@ -172,7 +176,7 @@ tests/
   - `sources` — Citation snippets shown to the user.
   - `agent_actions` — Search sub-queries and returned URLs.
 - **ChromaDB:** Transient, per-query scratch space for retrieval.
-- **In-memory session cache:** Keeps the last question/answer pair per session for conversational context.
+- **LangGraph Checkpoint (SQLite):** The single source of truth for conversation memory. Holds the last 4 raw turns of a session plus a rolling summary of everything older; read before every question is optimized and updated with the final answer right after — no separate in-memory cache involved.
 
 ## API Reference
 
@@ -227,6 +231,7 @@ uv run streamlit run app/static/streamlit_app.py
 - **Cross-Request State Leakage** — Module-level mutable variables caused data bleeding in long-running processes. All per-run state now securely lives inside LangGraph's `AgentState`.
 - **Neon's 5-Minute Autosuspend** — Silent connection drops were fixed by tuning the SQLAlchemy connection pool (`pool_pre_ping` + `pool_recycle`) to proactively retire stale connections.
 - **Sufficiency ≠ Volume** — Early versions judged content purely by character count. The current logic escalates only specific thin sources instead of assuming "more text = relevant text."
+- **Fragile One-Turn Memory** — Follow-up questions originally depended on a hand-rolled dictionary holding just the previous Q&A, and the query optimizer only ever read the single latest message regardless of what else was stored. Replaced both with a LangGraph-checkpointed rolling window (last 4 turns) plus an auto-summarized history, so the planner can resolve pronouns and multi-hop references across an entire conversation instead of one turn back.
 
 ## What I Learned
 The most challenging part of building this project was improving the quality of the agent's generated answers. Even a small change in one component rippled through every other stage, requiring deliberate, well-considered iteration.
@@ -234,11 +239,11 @@ The most challenging part of building this project was improving the quality of 
 Most of my time went into the query decomposer and optimizer. Comparing approaches made it clear how much additional engineering industrial-grade optimization requires. I focused on building the strongest version achievable for a single developer, learning that quality improvements don't have a natural stopping point, Part of the engineering discipline is deciding where to draw the line and documenting known limitations.
 
 ## Known Limitations & Roadmap
-- Follow-up context is limited to one previous turn, held in an in-process dictionary (resets on server restart).
+- Conversation memory lives in a LangGraph SQLite checkpoint that isn't yet on a persisted volume, so it won't survive a container rebuild (only a plain restart).
 - Tavily's `time_range` filters by index freshness, not actual publish date.
 - Currently running on a single EC2 instance without load balancing.
 - **Planned:**
-  - Persistent multi-turn memory in Postgres.
+  - Move the conversation checkpoint onto a persisted volume (or Postgres) so memory survives redeploys.
   - Surfacing search-progress events to the frontend UI.
   - Evaluation harness for retrieval quality.
   - JWT authentication for per-user session isolation and rate limiting.

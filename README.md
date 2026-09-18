@@ -51,7 +51,7 @@ Every step is logged to Postgres, so any run can be replayed and audited after t
 
 ## Live Demo
 
-- **Chat UI:** http://13.127.207.140:8501
+- **Chat UI:** https://cosponsor-womb-snugly.ngrok-free.dev
 - **API:** http://13.127.207.140:8000 (see [API Reference](#api-reference))
 
 > ⚠️ *Note: This is running on a time-limited AWS free-tier instance for demo purposes, so it may go offline after the credit period ends.*

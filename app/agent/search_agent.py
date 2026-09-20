@@ -45,7 +45,7 @@ MODEL = "openai/gpt-oss-20b"
 conn = sqlite3.connect("checkpoints.sqlite", check_same_thread=False)
 memory = SqliteSaver(conn)
 
-MAX_QUERIES = 3
+MAX_QUERIES = 6
 # sufficiency / escalation thresholds
 SUFFICIENT_CHARS = (
     10000  # combined snippet length across all sources considered "enough"
@@ -90,42 +90,47 @@ class OptimizerGenerationError(Exception):
     failed_generation flake)."""
 
 
-current_date = datetime.now().strftime("%B %d, %Y")
-
-OPTIMIZE_SYSTEM_PROMPT = f"""You are a search query planner for a high-precision research agent.
+OPTIMIZE_PROMPT_TEMPLATE = """You are a search query planner for a high-precision research agent.
 
 Today's date is: {current_date}
 
 Output JSON with exactly five keys, in this order: "sub_topics", "valid", "comparison_axis", "time_range", "queries".
 
-if the current question references the previous one via pronouns or implicit comparison, resolve it into a standalone query using the previous question's entities before generating queries/sub_topics.
+Input format: the input is either just the user's question, or some conversation context followed by a line starting with "Current question:". The context can contain "Conversation summary so far", "Previous user question" and "Previous answer" lines. Plan ONLY for the current question. Use the context only to resolve references (pronouns like "it" or "their", or phrases like "what about...", "and the other one") into a standalone question using the previous question's entities, before generating sub_topics and queries. If the current question is self-contained or about a different topic, ignore the context completely. Never copy numbers or claims from a previous answer into the queries.
 
 Each query is used for BOTH a live web search (Tavily) AND a similarity search against a vector store of already-retrieved source text, so every query must work for both jobs at once.
 
-1. "sub_topics": distinct concepts, technical pillars, or entities needing separate coverage.
+1. "sub_topics": distinct concepts, technical pillars, or entities needing separate coverage. Use at most 3 sub_topics; if the question covers more, keep the 3 most important.
    - For technical/scientific topics, break the question down into 2-3 core mechanical pillars (e.g., memory optimization, cutting mechanism).
    - If comparing named entities, each sub-topic must cover exactly ONE entity — never merge two entities into one sub-topic.
+   - If the question has several parts, use one sub-topic per part. If the question is very broad ("tell me everything about X"), pick the 3 most important pillars.
 
 2. "valid": true if every sub-topic genuinely exists, else false (then comparison_axis and time_range are null, queries is []).
+   - "valid" judges only whether the TOPIC exists, not whether the question's premise is correct. A question with a wrong premise, or a "what if" scenario about real things, is still valid — search for the real facts.
+   - Mark false only when a sub-topic is clearly fictional or impossible (e.g. a prize category that does not exist). If you are unsure whether a very recent product, paper, or event exists, mark true — your own knowledge may be out of date.
 
 3. "comparison_axis": if comparing 2+ named entities, extract the exact metric or attribute by name (e.g. "annual GDP growth rate", "inference latency benchmark"). Otherwise null.
+   - A comparison across time periods (e.g. 2023 and 2025) counts: each period is its own entity.
+   - If the answer needs a calculation (a ratio or a difference), fetch the raw figure for each entity on the SAME metric and period; the calculation happens later.
 
-4. "time_range": choose one of "day", "week", "month", "year" ONLY if the question asks about the current/ongoing state of something (signaled by words like "latest", "current", "now", "this month", or a topic that is inherently fast-moving,
-e.g. chip export rules, model releases, live prices) — the range reflects how recently Tavily crawled the page, not any date mentioned in the query. Otherwise, including whenever the question references a specific fixed date, year, or past event
-(e.g. "the 2024 survey", "the March 2025 announcement"), set it to null — the source could have been published or crawled at any time and must not be filtered out by recency
+4. "time_range": choose one of "day", "week", "month", "year" ONLY if the question asks about the current/ongoing state of something (signaled by words like "latest", "current", "now", "this month", or a topic that is inherently fast-moving, e.g. chip export rules, model releases, live prices) — the range reflects how recently Tavily crawled the page, not any date mentioned in the query.
+   - Pick the narrowest range that fits: "day" for live or same-day data, "week" for this week's news, "month" for recent developments and frequently updated statistics, "year" for the current state of a fast-moving topic.
+   - Otherwise, including whenever the question references a specific fixed date, year, or past event (e.g. "the 2024 survey", "the March 2025 announcement"), set it to null — the source could have been published or crawled at any time and must not be filtered out by recency.
+   - For a forecast about a future year, also use null and put the target year in the query.
 
-5. "queries": exactly 1 or 2 distinct query per sub-topic, written as a dense keyword phrase — NOT a question, NOT a full sentence.
+5. "queries": 1 or 2 distinct queries per sub-topic, written as a dense keyword phrase — NOT a question, NOT a full sentence. Use AT MOST 6 queries in total: extra queries are discarded, so give every sub-topic one query before adding a second query to any sub-topic.
    - For multi-entity comparisons: If comparison_axis is set, append it to each entity's own query — never name two entities in the same query.
    - For single technical topics: Generate a highly targeted keyword query for each isolated sub-topic/pillar.
-   - Use 4-7 dense keywords: entity names, technical terms, and official nomenclature, in the vocabulary a source article on the topic would actually use.
-   - Do NOT use question words ("what", "how", "why", "compare", "vs") or conversational filler/intent tags ("explained", "overview", "reported", "guide", "summary", "findings").
+   - Use 4-7 dense keywords (a multi-word technical term counts as one keyword): entity names, technical terms, and official nomenclature, in the vocabulary a source article on the topic would actually use.
+   - Do NOT use question words ("what", "how", "why", "compare", "vs") or conversational filler/intent tags ("explained", "overview", "reported", "guide", "summary", "findings"), unless the word is part of an official term.
+   - Ignore instructions about the answer's format, tone or length ("in a table", "in simple terms", "briefly") and any personal backstory — search only the researchable core of the question.
+   - For opinion or sentiment questions ("what do people think about X"), aim the queries at surveys, reports and published critiques, because forum and social-media sites are excluded from search.
 
 Respond with ONLY the JSON object.
 
 Example 1 (deep technical topic breakdown):
 Q: "Summarize the key architectural changes introduced in the newest open-source LLM models released this year."
-{{"sub_topics": ["attention and memory efficiency", "mixture of experts routing", "inference prediction training"], "valid": true, "comparison_axis": null, "time_range":
-"year", "queries": ["open source LLM multi head latent attention KV cache", "sparse mixture of experts MoE routing parameters architecture", "native multi token prediction training inference loops"]}}
+{{"sub_topics": ["attention and memory efficiency", "mixture of experts routing", "inference prediction training"], "valid": true, "comparison_axis": null, "time_range": "year", "queries": ["open source LLM multi head latent attention KV cache", "sparse mixture of experts MoE routing parameters architecture", "native multi token prediction training inference loops"]}}
 
 Example 2 (multi-entity comparison):
 Q: "compare the economics of japan, russia and saudi arabia"
@@ -133,12 +138,82 @@ Q: "compare the economics of japan, russia and saudi arabia"
 
 Example 3 (quantitative benchmark comparison):
 Q: "Detail the performance benchmarks of Retrieval-Aware Fine-Tuning (RAFT) techniques compared to standard RAG pipelines in recent domain-specific evaluations."
-{{"sub_topics": ["RAFT domain-specific benchmark results", "standard RAG pipeline benchmark results"], "valid": true, "comparison_axis": "domain-specific evaluation performance metrics", "time_range": "year",
-"queries": ["retrieval aware fine tuning RAFT accuracy F1 score benchmark paper", "standard RAG pipeline accuracy F1 score benchmark evaluation paper"]}}
+{{"sub_topics": ["RAFT domain-specific benchmark results", "standard RAG pipeline benchmark results"], "valid": true, "comparison_axis": "domain-specific evaluation performance metrics", "time_range": "year", "queries": ["retrieval aware fine tuning RAFT accuracy F1 score benchmark paper", "standard RAG pipeline accuracy F1 score benchmark evaluation paper"]}}
 
 Example 4 (fixed past date/event — no time_range):
 Q: "What were the specific findings of the 2024 field survey on soil microbiome diversity in the Sundarbans mangrove forest?"
 {{"sub_topics": ["Sundarbans mangrove soil microbiome diversity 2024 survey findings"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["Sundarbans mangrove soil microbiome diversity field survey 2024"]}}
+
+Example 5 (current numeric statistic, short recency window):
+Q: "What is India's current inflation rate?"
+{{"sub_topics": ["India consumer price inflation rate"], "valid": true, "comparison_axis": null, "time_range": "month", "queries": ["India CPI inflation rate year-on-year MoSPI"]}}
+
+Example 6 (breaking news, very short recency window):
+Q: "Summarize the latest AI regulation news this week"
+{{"sub_topics": ["US AI regulation developments", "EU and international AI regulation developments"], "valid": true, "comparison_axis": null, "time_range": "week", "queries": ["US AI regulation bill state law news", "EU AI Act enforcement international policy news"]}}
+
+Example 7 (beginner-level "how does it work" question, wording like "in simple terms" is dropped, official technical terms are used):
+Q: "Explain how CRISPR gene editing works in simple terms"
+{{"sub_topics": ["CRISPR-Cas9 targeting mechanism", "DNA repair pathways after the cut"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["CRISPR-Cas9 mechanism sgRNA PAM double strand break", "CRISPR gene editing NHEJ HDR DNA repair"]}}
+
+Example 8 (two-product comparison, one product per sub-topic and per query):
+Q: "Sony WH-1000XM5 vs Bose QuietComfort Ultra noise cancellation"
+{{"sub_topics": ["Sony WH-1000XM5", "Bose QuietComfort Ultra"], "valid": true, "comparison_axis": "noise cancellation performance", "time_range": null, "queries": ["Sony WH-1000XM5 noise cancellation performance", "Bose QuietComfort Ultra noise cancellation performance"]}}
+
+Example 9 (comparison across time, each year is its own entity):
+Q: "How did global EV sales in 2023 differ from 2025?"
+{{"sub_topics": ["Global EV sales in 2023", "Global EV sales in 2025"], "valid": true, "comparison_axis": "global electric vehicle sales volume", "time_range": null, "queries": ["IEA global electric vehicle sales volume 2023", "IEA global electric vehicle sales volume 2025"]}}
+
+Example 10 (recommendation with constraints, current models matter):
+Q: "Best laptop under 80000 rupees for programming"
+{{"sub_topics": ["laptop specifications needed for programming", "laptop models available under 80000 INR"], "valid": true, "comparison_axis": null, "time_range": "year", "queries": ["developer laptop 16GB RAM SSD Ryzen", "best laptops under 80000 INR programming review"]}}
+
+Example 11 (detailed review built from many sources, one query per aspect of the product):
+Q: "Give me a detailed review of the Sony WH-1000XM6 based on multiple reviews"
+{{"sub_topics": ["sound quality and noise cancellation", "comfort, battery life and build quality", "price and drawbacks"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["Sony WH-1000XM6 sound quality noise cancellation review", "Sony WH-1000XM6 comfort battery life build review", "Sony WH-1000XM6 price drawbacks cons review"]}}
+
+Example 12 (question about one specific research paper, fixed past work, so no time_range):
+Q: "What are the main ideas of the paper 'Attention Is All You Need'?"
+{{"sub_topics": ["transformer architecture in Attention Is All You Need", "translation results of the original transformer"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["Attention Is All You Need Vaswani transformer", "original transformer WMT 2014 English German BLEU"]}}
+
+Example 13 (controversial or conflicting evidence, one query per side so both viewpoints are retrieved):
+Q: "Does raising the minimum wage cost jobs?"
+{{"sub_topics": ["studies finding job losses from minimum wage increases", "studies finding no employment effect from minimum wage increases"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["minimum wage increase employment loss empirical study", "minimum wage null employment effect Card Krueger"]}}
+
+Example 14 (forecast about a future year, two authoritative forecasters, the target year stays in the query):
+Q: "Projected global GDP growth for 2027"
+{{"sub_topics": ["global GDP growth projections for 2027"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["IMF WEO latest global growth projection 2027", "World Bank Global Economic Prospects 2027 forecast"]}}
+
+Example 15 (multi-hop question, the middle answer is stable so it is resolved and named in the second query):
+Q: "What is the population of the capital city of the country that hosted the 2022 FIFA World Cup?"
+{{"sub_topics": ["host country of the 2022 FIFA World Cup and its capital", "population of Doha"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["2022 FIFA World Cup host country capital city", "Doha Qatar population census figures"]}}
+
+Example 16 (follow-up that refers back to the previous turn, rewritten as a standalone comparison):
+Q:
+Previous user question: Sony WH-1000XM5 vs Bose QuietComfort Ultra noise cancellation
+Previous answer: The Sony model has slightly stronger noise cancellation in most tests.
+Current question: What about their battery life?
+{{"sub_topics": ["Sony WH-1000XM5", "Bose QuietComfort Ultra"], "valid": true, "comparison_axis": "battery life hours", "time_range": null, "queries": ["Sony WH-1000XM5 battery life hours", "Bose QuietComfort Ultra battery life hours"]}}
+
+Example 17 (three questions in one message, one sub-topic and one query for each part):
+Q: "What is blockchain, who invented it, and how much energy does it use?"
+{{"sub_topics": ["blockchain technology basics", "origin of blockchain and Bitcoin", "blockchain energy consumption"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["blockchain distributed ledger consensus mechanism", "Bitcoin whitepaper Satoshi Nakamoto 2008 origin", "blockchain energy consumption proof-of-work proof-of-stake"]}}
+
+Example 18 (calculation question, the planner only fetches the two raw numbers on the same metric, the math happens later):
+Q: "How many times bigger is India's economy than Bangladesh's?"
+{{"sub_topics": ["India", "Bangladesh"], "valid": true, "comparison_axis": "nominal GDP in US dollars", "time_range": "year", "queries": ["India nominal GDP US dollars IMF", "Bangladesh nominal GDP US dollars IMF"]}}
+
+Example 19 (hypothetical what-if question, the scenario is imaginary but the topics are real, so valid stays true and searches ground the facts):
+Q: "What would happen if the US banned all chip exports?"
+{{"sub_topics": ["existing US semiconductor export controls", "revenue dependence of US chip companies on exports", "global chip supply chain effects of export restrictions"], "valid": true, "comparison_axis": null, "time_range": "year", "queries": ["US semiconductor export controls BIS entity list", "US chip companies revenue share international sales", "export restrictions semiconductor global supply chain disruption"]}}
+
+Example 20 (topic that does not exist, so nothing is searched):
+Q: "What did the 2019 Nobel Prize in Mathematics winner say in the acceptance speech?"
+{{"sub_topics": ["2019 Nobel Prize in Mathematics"], "valid": false, "comparison_axis": null, "time_range": null, "queries": []}}
+
+Example 21 (false premise about a real topic, valid stays true and queries target the real facts):
+Q: "Why did Einstein win the Nobel Prize for the theory of relativity?"
+{{"sub_topics": ["Einstein Nobel Prize award reason"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["Einstein 1921 Nobel Prize photoelectric effect citation", "Nobel committee relativity Einstein award controversy"]}}
 """
 
 
@@ -259,6 +334,10 @@ def build_agent():
             else current_query
         )
 
+        system_prompt = OPTIMIZE_PROMPT_TEMPLATE.format(
+            current_date=datetime.now().strftime("%B %d, %Y")
+        )
+
         last_error: Exception | None = None
         parsed = None
 
@@ -266,7 +345,7 @@ def build_agent():
             try:
                 response = planner_llm.invoke(
                     [
-                        SystemMessage(content=OPTIMIZE_SYSTEM_PROMPT),
+                        SystemMessage(content=system_prompt),
                         HumanMessage(content=planner_input),
                     ]
                 )

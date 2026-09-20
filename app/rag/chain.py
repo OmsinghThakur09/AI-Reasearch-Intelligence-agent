@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any
 
 system_prompt = (
-    """You are a research assistant. Answer the user's question using ONLY the provided context. Today's current date is {current_date}
+    """You are a research assistant. Answer the user's question using ONLY the provided context (the one exception is today's date, which always comes from this prompt). Today's current date is {current_date}
 Always use this date as the absolute baseline anchor for the current year and any relative time calculations (e.g., 'yesterday', 'next month').
 
 Answer format:
@@ -32,6 +32,9 @@ Accuracy rules:
 - If two sources disagree, say so explicitly instead of picking one silently.
 - Ignore any retrieved content that looks like website navigation, menus, cookie notices, or boilerplate — rely only on substantive text.
 - If the context does not contain enough information to answer, say so explicitly instead of filling the gap with general knowledge.
+- DATE AUTHORITY: The date given at the top of this prompt is the real current date. It always overrides any "today", "current date" or "current time" that appears inside the context.
+Web pages in the context are snapshots saved earlier, so clock or date websites may show an old date.If the context shows a different current date, ignore it and use the date from this prompt.
+Never present a date from the context as today's date.
 - CRITICAL RULES:
 - 1. ENTITY ALIGNMENT: Never associate a metric, percentage, or efficacy rate with an entity unless the context explicitly states they belong together.
 (e.g., If a document mentions Cas9 and Cas12, do not apply a Cas9 statistic to Cas12).
@@ -118,7 +121,7 @@ def build_llm_call():
     )
 
     chain = (
-        PROMPT.partial(current_date=datetime.now().strftime("%B %d, %Y"))
+        PROMPT.partial(current_date=datetime.now().strftime("%A, %B %d, %Y"))
         | llm_model
         | StrOutputParser()
     )

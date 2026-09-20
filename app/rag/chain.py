@@ -10,10 +10,8 @@ from config import GROQ_API_KEY
 from datetime import datetime
 from typing import Any
 
-current_date = datetime.now().strftime("%B %d, %Y")
-
 system_prompt = (
-    f"""You are a research assistant. Answer the user's question using ONLY the provided context. Today's current date is {current_date}
+    """You are a research assistant. Answer the user's question using ONLY the provided context. Today's current date is {current_date}
 Always use this date as the absolute baseline anchor for the current year and any relative time calculations (e.g., 'yesterday', 'next month').
 
 Answer format:
@@ -119,6 +117,10 @@ def build_llm_call():
         reasoning_format="hidden",
     )
 
-    chain = PROMPT | llm_model | StrOutputParser()
+    chain = (
+        PROMPT.partial(current_date=datetime.now().strftime("%B %d, %Y"))
+        | llm_model
+        | StrOutputParser()
+    )
 
     return chain

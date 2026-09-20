@@ -96,7 +96,9 @@ Today's date is: {current_date}
 
 Output JSON with exactly five keys, in this order: "sub_topics", "valid", "comparison_axis", "time_range", "queries".
 
-Input format: the input is either just the user's question, or some conversation context followed by a line starting with "Current question:". The context can contain "Conversation summary so far", "Previous user question" and "Previous answer" lines. Plan ONLY for the current question. Use the context only to resolve references (pronouns like "it" or "their", or phrases like "what about...", "and the other one") into a standalone question using the previous question's entities, before generating sub_topics and queries. If the current question is self-contained or about a different topic, ignore the context completely. Never copy numbers or claims from a previous answer into the queries.
+Input format: the input is either just the user's question, or some conversation context followed by a line starting with "Current question:". The context can contain "Conversation summary so far", "Previous user question" and "Previous answer" lines. Plan ONLY for the current question.
+Use the context only to resolve references (pronouns like "it" or "their", or phrases like "what about...", "and the other one") into a standalone question using the previous question's entities, before generating sub_topics and queries.
+If the current question is self-contained or about a different topic, ignore the context completely. Never copy numbers or claims from a previous answer into the queries.
 
 Each query is used for BOTH a live web search (Tavily) AND a similarity search against a vector store of already-retrieved source text, so every query must work for both jobs at once.
 
@@ -113,7 +115,8 @@ Each query is used for BOTH a live web search (Tavily) AND a similarity search a
    - A comparison across time periods (e.g. 2023 and 2025) counts: each period is its own entity.
    - If the answer needs a calculation (a ratio or a difference), fetch the raw figure for each entity on the SAME metric and period; the calculation happens later.
 
-4. "time_range": choose one of "day", "week", "month", "year" ONLY if the question asks about the current/ongoing state of something (signaled by words like "latest", "current", "now", "this month", or a topic that is inherently fast-moving, e.g. chip export rules, model releases, live prices) — the range reflects how recently Tavily crawled the page, not any date mentioned in the query.
+4. "time_range": choose one of "day", "week", "month", "year" ONLY if the question asks about the current/ongoing state of something (signaled by words like "latest", "current", "now", "this month", or a topic that is inherently fast-moving, e.g. chip export rules, model releases, live prices) —
+the range reflects how recently Tavily crawled the page, not any date mentioned in the query.
    - Pick the narrowest range that fits: "day" for live or same-day data, "week" for this week's news, "month" for recent developments and frequently updated statistics, "year" for the current state of a fast-moving topic.
    - Otherwise, including whenever the question references a specific fixed date, year, or past event (e.g. "the 2024 survey", "the March 2025 announcement"), set it to null — the source could have been published or crawled at any time and must not be filtered out by recency.
    - For a forecast about a future year, also use null and put the target year in the query.
@@ -130,7 +133,8 @@ Respond with ONLY the JSON object.
 
 Example 1 (deep technical topic breakdown):
 Q: "Summarize the key architectural changes introduced in the newest open-source LLM models released this year."
-{{"sub_topics": ["attention and memory efficiency", "mixture of experts routing", "inference prediction training"], "valid": true, "comparison_axis": null, "time_range": "year", "queries": ["open source LLM multi head latent attention KV cache", "sparse mixture of experts MoE routing parameters architecture", "native multi token prediction training inference loops"]}}
+{{"sub_topics": ["attention and memory efficiency", "mixture of experts routing", "inference prediction training"], "valid": true, "comparison_axis": null, "time_range": "year", "queries": ["open source LLM multi head latent attention KV cache",
+"sparse mixture of experts MoE routing parameters architecture", "native multi token prediction training inference loops"]}}
 
 Example 2 (multi-entity comparison):
 Q: "compare the economics of japan, russia and saudi arabia"
@@ -138,7 +142,8 @@ Q: "compare the economics of japan, russia and saudi arabia"
 
 Example 3 (quantitative benchmark comparison):
 Q: "Detail the performance benchmarks of Retrieval-Aware Fine-Tuning (RAFT) techniques compared to standard RAG pipelines in recent domain-specific evaluations."
-{{"sub_topics": ["RAFT domain-specific benchmark results", "standard RAG pipeline benchmark results"], "valid": true, "comparison_axis": "domain-specific evaluation performance metrics", "time_range": "year", "queries": ["retrieval aware fine tuning RAFT accuracy F1 score benchmark paper", "standard RAG pipeline accuracy F1 score benchmark evaluation paper"]}}
+{{"sub_topics": ["RAFT domain-specific benchmark results", "standard RAG pipeline benchmark results"], "valid": true, "comparison_axis": "domain-specific evaluation performance metrics", "time_range": "year",
+"queries": ["retrieval aware fine tuning RAFT accuracy F1 score benchmark paper", "standard RAG pipeline accuracy F1 score benchmark evaluation paper"]}}
 
 Example 4 (fixed past date/event — no time_range):
 Q: "What were the specific findings of the 2024 field survey on soil microbiome diversity in the Sundarbans mangrove forest?"
@@ -170,7 +175,8 @@ Q: "Best laptop under 80000 rupees for programming"
 
 Example 11 (detailed review built from many sources, one query per aspect of the product):
 Q: "Give me a detailed review of the Sony WH-1000XM6 based on multiple reviews"
-{{"sub_topics": ["sound quality and noise cancellation", "comfort, battery life and build quality", "price and drawbacks"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["Sony WH-1000XM6 sound quality noise cancellation review", "Sony WH-1000XM6 comfort battery life build review", "Sony WH-1000XM6 price drawbacks cons review"]}}
+{{"sub_topics": ["sound quality and noise cancellation", "comfort, battery life and build quality", "price and drawbacks"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["Sony WH-1000XM6 sound quality noise cancellation review",
+"Sony WH-1000XM6 comfort battery life build review", "Sony WH-1000XM6 price drawbacks cons review"]}}
 
 Example 12 (question about one specific research paper, fixed past work, so no time_range):
 Q: "What are the main ideas of the paper 'Attention Is All You Need'?"
@@ -197,7 +203,8 @@ Current question: What about their battery life?
 
 Example 17 (three questions in one message, one sub-topic and one query for each part):
 Q: "What is blockchain, who invented it, and how much energy does it use?"
-{{"sub_topics": ["blockchain technology basics", "origin of blockchain and Bitcoin", "blockchain energy consumption"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["blockchain distributed ledger consensus mechanism", "Bitcoin whitepaper Satoshi Nakamoto 2008 origin", "blockchain energy consumption proof-of-work proof-of-stake"]}}
+{{"sub_topics": ["blockchain technology basics", "origin of blockchain and Bitcoin", "blockchain energy consumption"], "valid": true, "comparison_axis": null, "time_range": null, "queries": ["blockchain distributed ledger consensus mechanism",
+"Bitcoin whitepaper Satoshi Nakamoto 2008 origin", "blockchain energy consumption proof-of-work proof-of-stake"]}}
 
 Example 18 (calculation question, the planner only fetches the two raw numbers on the same metric, the math happens later):
 Q: "How many times bigger is India's economy than Bangladesh's?"
@@ -205,7 +212,8 @@ Q: "How many times bigger is India's economy than Bangladesh's?"
 
 Example 19 (hypothetical what-if question, the scenario is imaginary but the topics are real, so valid stays true and searches ground the facts):
 Q: "What would happen if the US banned all chip exports?"
-{{"sub_topics": ["existing US semiconductor export controls", "revenue dependence of US chip companies on exports", "global chip supply chain effects of export restrictions"], "valid": true, "comparison_axis": null, "time_range": "year", "queries": ["US semiconductor export controls BIS entity list", "US chip companies revenue share international sales", "export restrictions semiconductor global supply chain disruption"]}}
+{{"sub_topics": ["existing US semiconductor export controls", "revenue dependence of US chip companies on exports", "global chip supply chain effects of export restrictions"], "valid": true, "comparison_axis": null,
+"time_range": "year", "queries": ["US semiconductor export controls BIS entity list", "US chip companies revenue share international sales", "export restrictions semiconductor global supply chain disruption"]}}
 
 Example 20 (topic that does not exist, so nothing is searched):
 Q: "What did the 2019 Nobel Prize in Mathematics winner say in the acceptance speech?"
